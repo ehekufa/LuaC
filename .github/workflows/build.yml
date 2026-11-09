@@ -49,12 +49,21 @@ jobs:
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             make
-      - name: Build
+      - name: Build CLI
+        shell: msys2 {0}
+        env:
+          CC: gcc
+        run: make -j2 all
+      - name: Build libraries
+        shell: msys2 {0}
+        env:
+          CC: gcc
+        run: make -j2 libraries
+      - name: Smoke test
         shell: msys2 {0}
         env:
           CC: gcc
         run: |
-          make -j2 all libraries
           ./luac.exe --version
           ./luac.exe examples/demo.lua
       - name: Package
@@ -75,7 +84,8 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-      - run: make -j2 all libraries
+      - run: make -j2 all
+      - run: make -j2 libraries
       - name: Package universal sources and native arm64 build
         run: |
           mkdir -p dist/macos
@@ -131,7 +141,10 @@ jobs:
         env:
           CC: gcc
           CXX: g++
-        run: make -j2 all gui
+        run: |
+          make -j2 all
+          make -j2 build/shader.vert.spv build/shader.frag.spv
+          make -j2 gui
       - name: Package
         shell: msys2 {0}
         run: |
@@ -153,11 +166,10 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
