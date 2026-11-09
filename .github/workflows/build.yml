@@ -65,6 +65,7 @@ jobs:
         shell: msys2 {0}
         env:
           CC: gcc
+          LUAC_TRACE: 1
         run: |
           ./luac.exe --version
           ./luac.exe examples/demo.lua

@@ -776,6 +776,7 @@ int main(int argc,char**argv){
       sprintf(sofile,"%s.so",cfile);
 #endif
       qso=shell_quote(sofile);sb_printf(&cmd,"%s -std=gnu99 -O2 -fPIC -shared %s -o %s -lm",qcc,qc,qso);free(qso);}
+     if(getenv("LUAC_TRACE"))fprintf(stderr,"luac: native command: %s\n",cmd.data);
      cr=run_command(cmd.data);sb_free(&cmd);free(qcc);free(qc);
      if(cr!=0){fprintf(stderr,"luac: native compilation failed\n");if(!keep){unlink(cfile);if(sofile)unlink(sofile);rmdir(tmp);}free(cfile);free(sofile);goto done;}
      if(mode==MODE_AOT){printf("built %s\n",output);status=0;if(!keep){unlink(cfile);rmdir(tmp);}free(cfile);goto done;}
