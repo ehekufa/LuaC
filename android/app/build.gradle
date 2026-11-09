@@ -1,0 +1,25 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.luac.studio'
+    compileSdk 35
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId 'com.luac.studio'
+        minSdk 26
+        targetSdk 35
+        versionCode 2
+        versionName '0.2.0'
+        externalNativeBuild {
+            cmake { cppFlags '-std=c++17' }
+        }
+    }
+    externalNativeBuild {
+        cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' }
+    }
+    buildTypes {
+        debug { minifyEnabled false }
+        release { minifyEnabled false }
+    }
+}

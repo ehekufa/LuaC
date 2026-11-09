@@ -1,0 +1,174 @@
+name: Native builds
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests and sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test
+        run: make -j2 && SANITIZE=1 make test
+
+  linux:
+    name: Linux CLI and libraries
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -j2 all libraries
+      - name: Package
+        run: |
+          mkdir -p dist/linux
+          cp luac build/libluac.a build/libluac.so src/luac.h src/runtime.h README.md LICENSE dist/linux/
+          cp -r examples dist/linux/
+          tar -C dist -czf dist/LuaC-linux-x86_64.tar.gz linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-linux-x86_64
+          path: dist/LuaC-linux-x86_64.tar.gz
+
+  windows:
+    name: Windows EXE and libraries
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            make
+      - name: Build
+        shell: msys2 {0}
+        env:
+          CC: gcc
+        run: |
+          make -j2 all libraries
+          ./luac.exe --version
+          ./luac.exe examples/demo.lua
+      - name: Package
+        shell: msys2 {0}
+        run: |
+          mkdir -p dist/windows
+          cp luac.exe build/libluac.a build/libluac.dll src/luac.h src/runtime.h README.md LICENSE dist/windows/
+          cp -r examples dist/windows/
+          7z a -tzip dist/LuaC-windows-x86_64.zip ./dist/windows/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-windows-x86_64
+          path: dist/LuaC-windows-x86_64.zip
+
+  macos:
+    name: macOS CLI and libraries
+    runs-on: macos-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -j2 all libraries
+      - name: Package universal sources and native arm64 build
+        run: |
+          mkdir -p dist/macos
+          cp luac build/libluac.a build/libluac.dylib src/luac.h src/runtime.h README.md LICENSE dist/macos/
+          cp -r examples dist/macos/
+          tar -C dist -czf dist/LuaC-macos-arm64.tar.gz macos
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-macos-arm64
+          path: dist/LuaC-macos-arm64.tar.gz
+
+  gui-linux:
+    name: Vulkan Studio Linux
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Vulkan and GLFW dependencies
+        run: sudo apt-get update && sudo apt-get install -y libglfw3-dev libvulkan-dev glslang-tools pkg-config
+      - run: make -j2 all gui
+      - name: Package
+        run: |
+          mkdir -p dist/studio-linux/build
+          cp luac build/luac-gui src/runtime.h README.md LICENSE dist/studio-linux/
+          cp build/*.spv dist/studio-linux/build/
+          cp -r examples dist/studio-linux/
+          tar -C dist -czf dist/LuaC-Studio-linux-x86_64.tar.gz studio-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-Studio-linux-x86_64
+          path: dist/LuaC-Studio-linux-x86_64.tar.gz
+
+  gui-windows:
+    name: Vulkan Studio Windows
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            make
+            pkgconf
+            mingw-w64-ucrt-x86_64-glfw
+            mingw-w64-ucrt-x86_64-vulkan-headers
+            mingw-w64-ucrt-x86_64-vulkan-loader
+            mingw-w64-ucrt-x86_64-glslang
+      - name: Build Vulkan Studio
+        shell: msys2 {0}
+        env:
+          CC: gcc
+          CXX: g++
+        run: make -j2 all gui
+      - name: Package
+        shell: msys2 {0}
+        run: |
+          mkdir -p dist/studio-windows/build
+          cp luac.exe build/luac-gui.exe src/runtime.h README.md LICENSE dist/studio-windows/
+          cp /ucrt64/bin/glfw3.dll dist/studio-windows/
+          if [ -f /ucrt64/bin/vulkan-1.dll ]; then cp /ucrt64/bin/vulkan-1.dll dist/studio-windows/; fi
+          cp build/*.spv dist/studio-windows/build/
+          cp -r examples dist/studio-windows/
+          7z a -tzip dist/LuaC-Studio-windows-x86_64.zip ./dist/studio-windows/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-Studio-windows-x86_64
+          path: dist/LuaC-Studio-windows-x86_64.zip
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Install Android NDK and CMake
+        run: sdkmanager 'ndk;27.2.12479018' 'cmake;3.22.1' 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Assemble APK
+        working-directory: android
+        run: gradle --no-daemon assembleDebug
+      - name: Package APK
+        run: mkdir -p dist && cp android/app/build/outputs/apk/debug/app-debug.apk dist/LuaC-Studio-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-Studio-Android-APK
+          path: dist/LuaC-Studio-debug.apk
