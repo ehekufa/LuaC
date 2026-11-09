@@ -12,8 +12,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           : > /tmp/luac-failures.log
-          gh api --allow-escape-sequences repos/${{ github.repository }}/actions/jobs/129349797734/logs >> /tmp/luac-failures.log 2>&1 || true
-          gh api --allow-escape-sequences repos/${{ github.repository }}/actions/jobs/129349798656/logs >> /tmp/luac-failures.log 2>&1 || true
+          gh api --allow-escape-sequences repos/${{ github.repository }}/actions/jobs/129352576829/logs >> /tmp/luac-failures.log 2>&1 || true
+          gh api --allow-escape-sequences repos/${{ github.repository }}/actions/jobs/129352577048/logs >> /tmp/luac-failures.log 2>&1 || true
           python3 - <<'PY'
           import json
           from pathlib import Path
