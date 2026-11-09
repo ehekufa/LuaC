@@ -1,0 +1,31 @@
+name: Build failure diagnostics
+
+on:
+  workflow_run:
+    workflows: ['Native builds']
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Attach compiler output to the failed commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          gh run view "$RUN_ID" -R "${{ github.repository }}" --log-failed > /tmp/luac-failures.log
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          text = Path('/tmp/luac-failures.log').read_text(errors='replace')[-55000:]
+          payload = {'body': '### LuaC native build diagnostics\n\n```text\n' + text + '\n```'}
+          Path('/tmp/luac-comment.json').write_text(json.dumps(payload))
+          PY
+          gh api repos/${{ github.repository }}/commits/$HEAD_SHA/comments --input /tmp/luac-comment.json

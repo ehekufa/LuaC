@@ -7,10 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-env:
-  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  contents: read
 
 jobs:
   test:
@@ -56,8 +53,7 @@ jobs:
         shell: msys2 {0}
         env:
           CC: gcc
-          CI_LOG_NAME: Windows CLI compiler
-        run: ci/run.sh make -j2 all
+        run: make -j2 all
       - name: Build libraries
         shell: msys2 {0}
         env:
@@ -88,10 +84,7 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-      - name: Build macOS CLI
-        env:
-          CI_LOG_NAME: macOS CLI compiler
-        run: ci/run.sh make -j2 all
+      - run: make -j2 all
       - run: make -j2 libraries
       - name: Package universal sources and native arm64 build
         run: |
@@ -148,8 +141,7 @@ jobs:
         env:
           CC: gcc
           CXX: g++
-          CI_LOG_NAME: Windows Vulkan Studio compiler
-        run: ci/run.sh make -j2 all gui
+        run: make -j2 all gui
       - name: Package
         shell: msys2 {0}
         run: |
@@ -192,9 +184,8 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null
           "$SDKMANAGER" 'ndk;27.2.12479018' 'cmake;3.22.1' 'platforms;android-35' 'build-tools;35.0.0'
       - name: Assemble APK
-        env:
-          CI_LOG_NAME: Android Gradle and NDK compiler
-        run: ci/run.sh gradle --no-daemon -p android assembleDebug
+        working-directory: android
+        run: gradle --no-daemon assembleDebug
       - name: Package APK
         run: mkdir -p dist && cp android/app/build/outputs/apk/debug/app-debug.apk dist/LuaC-Studio-debug.apk
       - uses: actions/upload-artifact@v4
