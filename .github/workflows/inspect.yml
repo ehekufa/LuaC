@@ -1,0 +1,17 @@
+name: Inspect traced Windows JIT
+on: push
+permissions: { actions: read, contents: write }
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+        run: |
+          gh api --allow-escape-sequences repos/${{ github.repository }}/actions/jobs/129360048142/logs > /tmp/log
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          text=Path('/tmp/log').read_text(errors='replace')[-55000:]
+          Path('/tmp/comment').write_text(json.dumps({'body':'```text\n'+text+'\n```'}))
+          PY
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments --input /tmp/comment
