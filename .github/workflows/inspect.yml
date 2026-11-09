@@ -1,0 +1,23 @@
+name: Inspect completed native jobs
+on: push
+permissions:
+  actions: read
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read completed Android and macOS logs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          : > /tmp/luac-failures.log
+          gh api repos/${{ github.repository }}/actions/jobs/129349797734/logs >> /tmp/luac-failures.log 2>&1 || true
+          gh api repos/${{ github.repository }}/actions/jobs/129349798656/logs >> /tmp/luac-failures.log 2>&1 || true
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          text = Path('/tmp/luac-failures.log').read_text(errors='replace')[-55000:]
+          Path('/tmp/luac-comment.json').write_text(json.dumps({'body': '### Native compiler diagnostics\n\n```text\n' + text + '\n```'}))
+          PY
+          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments --input /tmp/luac-comment.json

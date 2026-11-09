@@ -194,27 +194,3 @@ jobs:
           name: LuaC-Studio-Android-APK
           path: dist/LuaC-Studio-debug.apk
 
-  diagnostics:
-    name: Publish build failure diagnostics
-    if: always()
-    needs: [linux, windows, macos, gui-linux, gui-windows, android]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Attach failed logs to the commit
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUN_ID: ${{ github.run_id }}
-          HEAD_SHA: ${{ github.sha }}
-        run: |
-          : > /tmp/luac-failures.log
-          gh api repos/${{ github.repository }}/actions/jobs/129349797734/logs >> /tmp/luac-failures.log 2>&1 || true
-          gh api repos/${{ github.repository }}/actions/jobs/129349798656/logs >> /tmp/luac-failures.log 2>&1 || true
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          text = Path('/tmp/luac-failures.log').read_text(errors='replace')[-55000:]
-          payload = {'body': '### LuaC native build diagnostics\n\n```text\n' + text + '\n```'}
-          Path('/tmp/luac-comment.json').write_text(json.dumps(payload))
-          PY
-          gh api repos/${{ github.repository }}/commits/$HEAD_SHA/comments --input /tmp/luac-comment.json
-
