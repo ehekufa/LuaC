@@ -207,8 +207,8 @@ again:
 #undef OP1
 }
 
-static int accept(Parser *p, TokenKind k) { if (p->token.kind == k) { next_token(p); return 1; } return 0; }
-static int expect(Parser *p, TokenKind k) { if (accept(p,k)) return 1; parse_error(p,"expected '%s', got '%s'",token_name(k),token_name(p->token.kind)); return 0; }
+static int accept_token(Parser *p, TokenKind k) { if (p->token.kind == k) { next_token(p); return 1; } return 0; }
+static int expect(Parser *p, TokenKind k) { if (accept_token(p,k)) return 1; parse_error(p,"expected '%s', got '%s'",token_name(k),token_name(p->token.kind)); return 0; }
 static char *expect_name(Parser *p) { char *s; if (p->token.kind != T_NAME) { parse_error(p,"expected name"); return xstrdup("error"); } s=xstrdup(p->token.text); next_token(p); return s; }
 
 /* -------------------------------- AST ----------------------------------- */
@@ -250,9 +250,9 @@ static Expr *parse_function_body(Parser *p, int line, int method) {
     if (method) name_list_add(&e->params,&e->nparams,xstrdup("self"));
     if (p->token.kind!=T_RPAREN) {
         for (;;) {
-            if (accept(p,T_DOTS)) { e->flag=1; break; }
+            if (accept_token(p,T_DOTS)) { e->flag=1; break; }
             name_list_add(&e->params,&e->nparams,expect_name(p));
-            if (!accept(p,T_COMMA)) break;
+            if (!accept_token(p,T_COMMA)) break;
         }
     }
     expect(p,T_RPAREN); e->body=parse_block(p); expect(p,T_END); return e;
@@ -262,30 +262,30 @@ static Expr *parse_table(Parser *p) {
     Expr *e=new_expr(p,E_TABLE); expect(p,T_LBRACE);
     while (p->token.kind!=T_RBRACE && !p->failed) {
         Expr *key=NULL,*value;
-        if (accept(p,T_LBRACKET)) { key=parse_expr(p); expect(p,T_RBRACKET); expect(p,T_ASSIGN); value=parse_expr(p); }
+        if (accept_token(p,T_LBRACKET)) { key=parse_expr(p); expect(p,T_RBRACKET); expect(p,T_ASSIGN); value=parse_expr(p); }
         else if (p->token.kind==T_NAME) {
             char *name=xstrdup(p->token.text); next_token(p);
-            if (accept(p,T_ASSIGN)) { key=new_expr(p,E_STRING); key->name=name; value=parse_expr(p); }
+            if (accept_token(p,T_ASSIGN)) { key=new_expr(p,E_STRING); key->name=name; value=parse_expr(p); }
             else {
                 Expr *v=new_expr(p,E_VAR); v->name=name; v->line=key?key->line:p->token.line;
                 value=parse_subexpr_tail(p,parse_suffix(p,v),0);
             }
         } else value=parse_expr(p);
         expr_list_add(&e->items,&e->count,value); e->keys=xrealloc(e->keys,sizeof(Expr*)*(size_t)e->count); e->keys[e->count-1]=key;
-        if (!accept(p,T_COMMA) && !accept(p,T_SEMI)) break;
+        if (!accept_token(p,T_COMMA) && !accept_token(p,T_SEMI)) break;
     }
     expect(p,T_RBRACE); return e;
 }
 
 static Expr *parse_suffix(Parser *p, Expr *e) {
     for (;;) {
-        if (accept(p,T_DOT)) { Expr *ix=new_expr(p,E_INDEX),*k=new_expr(p,E_STRING); ix->a=e; k->name=expect_name(p); ix->b=k; e=ix; }
-        else if (accept(p,T_LBRACKET)) { Expr *ix=new_expr(p,E_INDEX); ix->a=e; ix->b=parse_expr(p); expect(p,T_RBRACKET); e=ix; }
+        if (accept_token(p,T_DOT)) { Expr *ix=new_expr(p,E_INDEX),*k=new_expr(p,E_STRING); ix->a=e; k->name=expect_name(p); ix->b=k; e=ix; }
+        else if (accept_token(p,T_LBRACKET)) { Expr *ix=new_expr(p,E_INDEX); ix->a=e; ix->b=parse_expr(p); expect(p,T_RBRACKET); e=ix; }
         else if (p->token.kind==T_COLON || p->token.kind==T_LPAREN || p->token.kind==T_STRING || p->token.kind==T_LBRACE) {
             Expr *call=new_expr(p,E_CALL); call->a=e;
-            if (accept(p,T_COLON)) { call->flag=1; call->name=expect_name(p); }
-            if (accept(p,T_LPAREN)) {
-                if (p->token.kind!=T_RPAREN) for (;;) { expr_list_add(&call->items,&call->count,parse_expr(p)); if(!accept(p,T_COMMA))break; }
+            if (accept_token(p,T_COLON)) { call->flag=1; call->name=expect_name(p); }
+            if (accept_token(p,T_LPAREN)) {
+                if (p->token.kind!=T_RPAREN) for (;;) { expr_list_add(&call->items,&call->count,parse_expr(p)); if(!accept_token(p,T_COMMA))break; }
                 expect(p,T_RPAREN);
             } else if (p->token.kind==T_STRING) { Expr *a=new_expr(p,E_STRING); a->name=xstrdup(p->token.text); next_token(p); expr_list_add(&call->items,&call->count,a); }
             else if (p->token.kind==T_LBRACE) expr_list_add(&call->items,&call->count,parse_table(p));
@@ -306,7 +306,7 @@ static Expr *parse_primary(Parser *p) {
     else if (p->token.kind==T_NAME) { e=new_expr(p,E_VAR); e->name=xstrdup(p->token.text); next_token(p); }
     else if (p->token.kind==T_FUNCTION) { int line=p->token.line; next_token(p); return parse_function_body(p,line,0); }
     else if (p->token.kind==T_LBRACE) return parse_table(p);
-    else if (accept(p,T_LPAREN)) { e=parse_expr(p); expect(p,T_RPAREN); /* Parentheses force one result. */ { Expr *u=new_expr(p,E_UNARY); u->op=3; u->a=e; e=u; } }
+    else if (accept_token(p,T_LPAREN)) { e=parse_expr(p); expect(p,T_RPAREN); /* Parentheses force one result. */ { Expr *u=new_expr(p,E_UNARY); u->op=3; u->a=e; e=u; } }
     else { parse_error(p,"expected expression, got '%s'",token_name(p->token.kind)); return new_expr(p,E_NIL); }
     return parse_suffix(p,e);
 }
@@ -337,57 +337,57 @@ static Expr *parse_subexpr(Parser *p,int limit) {
     return parse_subexpr_tail(p,left,limit);
 }
 static Expr *parse_expr(Parser *p) { return parse_subexpr(p,0); }
-static void parse_expr_list(Parser *p,Expr ***list,int *n) { do { expr_list_add(list,n,parse_expr(p)); } while(accept(p,T_COMMA)); }
+static void parse_expr_list(Parser *p,Expr ***list,int *n) { do { expr_list_add(list,n,parse_expr(p)); } while(accept_token(p,T_COMMA)); }
 
 static int block_end(TokenKind k) { return k==T_EOF||k==T_END||k==T_ELSE||k==T_ELSEIF||k==T_UNTIL; }
 static Stmt *stmt_append(Stmt *head,Stmt *s) { Stmt *p=head; if(!head)return s; while(p->next)p=p->next; p->next=s; return head; }
 
 static Stmt *parse_statement(Parser *p) {
     int line=p->token.line;
-    if (accept(p,T_SEMI)) return NULL;
-    if (accept(p,T_LOCAL)) {
-        if (accept(p,T_FUNCTION)) {
+    if (accept_token(p,T_SEMI)) return NULL;
+    if (accept_token(p,T_LOCAL)) {
+        if (accept_token(p,T_FUNCTION)) {
             Stmt *s=new_stmt(p,S_LOCALFUNC); s->line=line; name_list_add(&s->names,&s->nnames,expect_name(p)); s->expr=parse_function_body(p,line,0); return s;
         }
         { Stmt *s=new_stmt(p,S_LOCAL); s->line=line;
-          do { name_list_add(&s->names,&s->nnames,expect_name(p)); } while(accept(p,T_COMMA));
-          if(accept(p,T_ASSIGN)) parse_expr_list(p,&s->exprs,&s->nexprs);
+          do { name_list_add(&s->names,&s->nnames,expect_name(p)); } while(accept_token(p,T_COMMA));
+          if(accept_token(p,T_ASSIGN)) parse_expr_list(p,&s->exprs,&s->nexprs);
           return s; }
     }
-    if (accept(p,T_FUNCTION)) {
+    if (accept_token(p,T_FUNCTION)) {
         Stmt *s=new_stmt(p,S_ASSIGN); Expr *var=new_expr(p,E_VAR); var->name=expect_name(p); s->line=line;
-        while(accept(p,T_DOT)){Expr *ix=new_expr(p,E_INDEX),*k=new_expr(p,E_STRING);ix->a=var;k->name=expect_name(p);ix->b=k;var=ix;}
-        { int method=accept(p,T_COLON); char *method_name=NULL; if(method)method_name=expect_name(p);
+        while(accept_token(p,T_DOT)){Expr *ix=new_expr(p,E_INDEX),*k=new_expr(p,E_STRING);ix->a=var;k->name=expect_name(p);ix->b=k;var=ix;}
+        { int method=accept_token(p,T_COLON); char *method_name=NULL; if(method)method_name=expect_name(p);
           if(method){Expr *ix=new_expr(p,E_INDEX),*k=new_expr(p,E_STRING);ix->a=var;k->name=method_name;ix->b=k;var=ix;}
           expr_list_add(&s->exprs,&s->nexprs,var); expr_list_add(&s->exprs,&s->nexprs,parse_function_body(p,line,method));
           /* Assignment uses first half as targets and second as values; mark one target. */
           s->nexprs=1; s->expr=var; s->expr2=s->exprs[1]; free(s->exprs);s->exprs=NULL;s->nexprs=0; return s; }
     }
-    if (accept(p,T_IF)) {
+    if (accept_token(p,T_IF)) {
         Stmt *s=new_stmt(p,S_IF); s->line=line;
         for(;;){
             Expr *cond=parse_expr(p); Stmt *body; expect(p,T_THEN); body=parse_block(p);
             s->conds=xrealloc(s->conds,sizeof(Expr*)*(size_t)(s->nblocks+1));s->blocks=xrealloc(s->blocks,sizeof(Stmt*)*(size_t)(s->nblocks+1));
             s->conds[s->nblocks]=cond;s->blocks[s->nblocks]=body;++s->nblocks;
-            if(!accept(p,T_ELSEIF))break;
+            if(!accept_token(p,T_ELSEIF))break;
         }
-        if(accept(p,T_ELSE)){s->blocks=xrealloc(s->blocks,sizeof(Stmt*)*(size_t)(s->nblocks+1));s->conds=xrealloc(s->conds,sizeof(Expr*)*(size_t)(s->nblocks+1));s->conds[s->nblocks]=NULL;s->blocks[s->nblocks]=parse_block(p);++s->nblocks;}
+        if(accept_token(p,T_ELSE)){s->blocks=xrealloc(s->blocks,sizeof(Stmt*)*(size_t)(s->nblocks+1));s->conds=xrealloc(s->conds,sizeof(Expr*)*(size_t)(s->nblocks+1));s->conds[s->nblocks]=NULL;s->blocks[s->nblocks]=parse_block(p);++s->nblocks;}
         expect(p,T_END);return s;
     }
-    if (accept(p,T_WHILE)) { Stmt *s=new_stmt(p,S_WHILE);s->line=line;s->expr=parse_expr(p);expect(p,T_DO);s->body=parse_block(p);expect(p,T_END);return s; }
-    if (accept(p,T_REPEAT)) { Stmt *s=new_stmt(p,S_REPEAT);s->line=line;s->body=parse_block(p);expect(p,T_UNTIL);s->expr=parse_expr(p);return s; }
-    if (accept(p,T_DO)) { Stmt *s=new_stmt(p,S_DO);s->line=line;s->body=parse_block(p);expect(p,T_END);return s; }
-    if (accept(p,T_FOR)) {
+    if (accept_token(p,T_WHILE)) { Stmt *s=new_stmt(p,S_WHILE);s->line=line;s->expr=parse_expr(p);expect(p,T_DO);s->body=parse_block(p);expect(p,T_END);return s; }
+    if (accept_token(p,T_REPEAT)) { Stmt *s=new_stmt(p,S_REPEAT);s->line=line;s->body=parse_block(p);expect(p,T_UNTIL);s->expr=parse_expr(p);return s; }
+    if (accept_token(p,T_DO)) { Stmt *s=new_stmt(p,S_DO);s->line=line;s->body=parse_block(p);expect(p,T_END);return s; }
+    if (accept_token(p,T_FOR)) {
         char *first=expect_name(p);
-        if(accept(p,T_ASSIGN)){Stmt*s=new_stmt(p,S_FORNUM);s->line=line;name_list_add(&s->names,&s->nnames,first);s->expr=parse_expr(p);expect(p,T_COMMA);s->expr2=parse_expr(p);if(accept(p,T_COMMA))s->expr3=parse_expr(p);expect(p,T_DO);s->body=parse_block(p);expect(p,T_END);return s;}
-        {Stmt*s=new_stmt(p,S_FORIN);s->line=line;name_list_add(&s->names,&s->nnames,first);while(accept(p,T_COMMA))name_list_add(&s->names,&s->nnames,expect_name(p));expect(p,T_IN);parse_expr_list(p,&s->exprs,&s->nexprs);expect(p,T_DO);s->body=parse_block(p);expect(p,T_END);return s;}
+        if(accept_token(p,T_ASSIGN)){Stmt*s=new_stmt(p,S_FORNUM);s->line=line;name_list_add(&s->names,&s->nnames,first);s->expr=parse_expr(p);expect(p,T_COMMA);s->expr2=parse_expr(p);if(accept_token(p,T_COMMA))s->expr3=parse_expr(p);expect(p,T_DO);s->body=parse_block(p);expect(p,T_END);return s;}
+        {Stmt*s=new_stmt(p,S_FORIN);s->line=line;name_list_add(&s->names,&s->nnames,first);while(accept_token(p,T_COMMA))name_list_add(&s->names,&s->nnames,expect_name(p));expect(p,T_IN);parse_expr_list(p,&s->exprs,&s->nexprs);expect(p,T_DO);s->body=parse_block(p);expect(p,T_END);return s;}
     }
-    if (accept(p,T_RETURN)) { Stmt*s=new_stmt(p,S_RETURN);s->line=line;if(!block_end(p->token.kind)&&p->token.kind!=T_SEMI)parse_expr_list(p,&s->exprs,&s->nexprs);accept(p,T_SEMI);return s; }
-    if (accept(p,T_BREAK)) { Stmt*s=new_stmt(p,S_BREAK);s->line=line;return s; }
+    if (accept_token(p,T_RETURN)) { Stmt*s=new_stmt(p,S_RETURN);s->line=line;if(!block_end(p->token.kind)&&p->token.kind!=T_SEMI)parse_expr_list(p,&s->exprs,&s->nexprs);accept_token(p,T_SEMI);return s; }
+    if (accept_token(p,T_BREAK)) { Stmt*s=new_stmt(p,S_BREAK);s->line=line;return s; }
     {
         Expr *first=parse_primary(p);
         if(p->token.kind==T_ASSIGN||p->token.kind==T_COMMA){
-            Stmt*s=new_stmt(p,S_ASSIGN);s->line=line;expr_list_add(&s->exprs,&s->nexprs,first);while(accept(p,T_COMMA))expr_list_add(&s->exprs,&s->nexprs,parse_primary(p));expect(p,T_ASSIGN);
+            Stmt*s=new_stmt(p,S_ASSIGN);s->line=line;expr_list_add(&s->exprs,&s->nexprs,first);while(accept_token(p,T_COMMA))expr_list_add(&s->exprs,&s->nexprs,parse_primary(p));expect(p,T_ASSIGN);
             s->flag=s->nexprs;parse_expr_list(p,&s->exprs,&s->nexprs);return s;
         }
         if(first->kind!=E_CALL)parse_error(p,"only calls can be expression statements");
@@ -702,7 +702,7 @@ static void *dlsym(void *handle, const char *name) {
 }
 static int dlclose(void *handle) { return FreeLibrary((HMODULE)handle) ? 0 : -1; }
 static char *dlerror(void) { return luac_dl_error; }
-static char *mkdtemp(char *template_name) {
+static char *luac_mkdtemp(char *template_name) {
     char *where = strstr(template_name, "XXXXXX");
     unsigned int attempt;
     if (!where) return NULL;
@@ -715,6 +715,7 @@ static char *mkdtemp(char *template_name) {
     }
     return NULL;
 }
+#define mkdtemp luac_mkdtemp
 #endif
 static char *read_file(const char*path,size_t*n){FILE*f=fopen(path,"rb");char*s;long size;if(!f){fprintf(stderr,"luac: cannot open %s: %s\n",path,strerror(errno));return NULL;}fseek(f,0,SEEK_END);size=ftell(f);fseek(f,0,SEEK_SET);if(size<0){fclose(f);return NULL;}s=xmalloc((size_t)size+1);if(fread(s,1,(size_t)size,f)!=(size_t)size){fclose(f);free(s);return NULL;}s[size]=0;fclose(f);*n=(size_t)size;return s;}
 static int write_file(const char*path,const char*data,size_t n){FILE*f=fopen(path,"wb");if(!f)return 0;if(fwrite(data,1,n,f)!=n){fclose(f);return 0;}return fclose(f)==0;}
