@@ -209,7 +209,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           HEAD_SHA: ${{ github.sha }}
         run: |
-          gh run view "$RUN_ID" --log-failed > /tmp/luac-failures.log 2>&1 || true
+          gh run view "$RUN_ID" -R "${{ github.repository }}" --log-failed > /tmp/luac-failures.log 2>&1 || true
           python3 - <<'PY'
           import json
           from pathlib import Path
