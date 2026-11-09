@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 jobs:
   test:
@@ -173,8 +174,19 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Install Android command-line tools
+        run: |
+          mkdir -p "$ANDROID_HOME/cmdline-tools" /tmp/android-cli
+          curl -fL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/android-cli/tools.zip
+          unzip -q /tmp/android-cli/tools.zip -d /tmp/android-cli
+          rm -rf "$ANDROID_HOME/cmdline-tools/latest"
+          mv /tmp/android-cli/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
       - name: Install Android NDK and CMake
-        run: sdkmanager 'ndk;27.2.12479018' 'cmake;3.22.1' 'platforms;android-35' 'build-tools;35.0.0'
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" --version
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" 'ndk;27.2.12479018' 'cmake;3.22.1' 'platforms;android-35' 'build-tools;35.0.0'
       - name: Assemble APK
         working-directory: android
         run: gradle --no-daemon assembleDebug
@@ -184,3 +196,29 @@ jobs:
         with:
           name: LuaC-Studio-Android-APK
           path: dist/LuaC-Studio-debug.apk
+
+  diagnostics:
+    name: Publish build failure diagnostics
+    if: always()
+    needs: [linux, windows, macos, gui-linux, gui-windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Attach failed logs to Checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if gh run view "$RUN_ID" --log-failed > /tmp/luac-failures.log 2>/dev/null && [ -s /tmp/luac-failures.log ]; then
+            python3 - <<'PY' > /tmp/luac-summary.txt
+            from pathlib import Path
+            print('```text')
+            print(Path('/tmp/luac-failures.log').read_text(errors='replace')[-55000:])
+            print('```')
+            PY
+            gh api repos/${{ github.repository }}/check-runs \
+              -f head_sha="$HEAD_SHA" -f name="LuaC build diagnostics $RUN_ID" \
+              -f status=completed -f conclusion=neutral \
+              -f output.title="Failed native build logs" \
+              -f output.summary="$(cat /tmp/luac-summary.txt)"
+          fi

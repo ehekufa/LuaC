@@ -7,17 +7,23 @@ CXXFLAGS ?= -O2 -g
 WARNINGS = -Wall -Wextra -Wno-unused-parameter -Wno-unused-function
 RUNTIME_PATH = $(abspath src/runtime.h)
 BUILD = build
-DL_LIBS = -ldl
+DL_LIBS =
 SHARED_EXT = so
 SHARED_FLAG = -shared
 GUI_LIBS = $(shell pkg-config --libs glfw3 vulkan 2>/dev/null)
 GUI_CFLAGS = $(shell pkg-config --cflags glfw3 vulkan 2>/dev/null)
+UNAME_S := $(shell uname -s 2>/dev/null)
+ifeq ($(UNAME_S),Linux)
+  DL_LIBS = -ldl
+endif
 ifeq ($(OS),Windows_NT)
-  DL_LIBS =
   SHARED_EXT = dll
   EXE = .exe
 endif
-UNAME_S := $(shell uname -s 2>/dev/null)
+ifneq ($(findstring MINGW,$(UNAME_S)),)
+  SHARED_EXT = dll
+  EXE = .exe
+endif
 ifeq ($(UNAME_S),Darwin)
   DL_LIBS =
   SHARED_EXT = dylib
@@ -56,9 +62,12 @@ gui: $(BUILD)/shader.vert.spv $(BUILD)/shader.frag.spv
 test: luac
 	./tests/run.sh
 
-install: src/luac.c src/luac.h src/runtime.h
-	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/luac
+install: src/luac.c src/luac.h src/runtime.h libraries
+	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/share/luac
 	install -m644 src/runtime.h $(DESTDIR)$(PREFIX)/share/luac/runtime.h
+	install -m644 src/luac.h $(DESTDIR)$(PREFIX)/include/luac.h
+	install -m644 $(BUILD)/libluac.a $(DESTDIR)$(PREFIX)/lib/libluac.a
+	install -m755 $(BUILD)/libluac.$(SHARED_EXT) $(DESTDIR)$(PREFIX)/lib/libluac.$(SHARED_EXT)
 	$(CC) -std=gnu99 $(CFLAGS) $(WARNINGS) -DLUAC_RUNTIME_PATH=\"$(PREFIX)/share/luac/runtime.h\" src/luac.c -o $(DESTDIR)$(PREFIX)/bin/luac $(DL_LIBS)
 
 clean:
