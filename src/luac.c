@@ -682,6 +682,10 @@ LUAC_API void luac_free(void *memory) { free(memory); }
 
 /* -------------------------------- Driver -------------------------------- */
 #ifndef LUAC_LIBRARY_ONLY
+#ifndef _WIN32
+/* mkdtemp is a BSD extension on macOS and is hidden by POSIX feature macros. */
+extern char *mkdtemp(char *template_name);
+#endif
 #ifdef _WIN32
 #include <direct.h>
 #define RTLD_NOW 0

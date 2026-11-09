@@ -204,6 +204,8 @@ void draw() {
 }
 }
 
+void androidVulkanDraw();
+
 bool androidVulkanCreate(JNIEnv *env, jobject surface) {
     try {
         destroy();
