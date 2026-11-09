@@ -1,4 +1,5 @@
-luac
+/luac
+/luac.exe
 a.luac.c
 tests/.tmp/
 *.so
