@@ -7,8 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  checks: write
+  contents: write
   actions: read
 
 jobs:
@@ -204,22 +203,18 @@ jobs:
     needs: [linux, windows, macos, gui-linux, gui-windows, android]
     runs-on: ubuntu-latest
     steps:
-      - name: Attach failed logs to Checks
+      - name: Attach failed logs to the commit
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.run_id }}
           HEAD_SHA: ${{ github.sha }}
         run: |
-          if gh run view "$RUN_ID" --log-failed > /tmp/luac-failures.log 2>/dev/null && [ -s /tmp/luac-failures.log ]; then
-            python3 - <<'PY' > /tmp/luac-summary.txt
-            from pathlib import Path
-            print('```text')
-            print(Path('/tmp/luac-failures.log').read_text(errors='replace')[-55000:])
-            print('```')
-            PY
-            gh api repos/${{ github.repository }}/check-runs \
-              -f head_sha="$HEAD_SHA" -f name="LuaC build diagnostics $RUN_ID" \
-              -f status=completed -f conclusion=neutral \
-              -f output.title="Failed native build logs" \
-              -f output.summary="$(cat /tmp/luac-summary.txt)"
-          fi
+          gh run view "$RUN_ID" --log-failed > /tmp/luac-failures.log 2>&1 || true
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          text = Path('/tmp/luac-failures.log').read_text(errors='replace')[-55000:]
+          payload = {'body': '### LuaC native build diagnostics\n\n```text\n' + text + '\n```'}
+          Path('/tmp/luac-comment.json').write_text(json.dumps(payload))
+          PY
+          gh api repos/${{ github.repository }}/commits/$HEAD_SHA/comments --input /tmp/luac-comment.json
