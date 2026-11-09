@@ -50,6 +50,7 @@ jobs:
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             make
+            p7zip
       - name: Build CLI
         shell: msys2 {0}
         env:
@@ -132,6 +133,7 @@ jobs:
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             make
+            p7zip
             pkgconf
             mingw-w64-ucrt-x86_64-glfw
             mingw-w64-ucrt-x86_64-vulkan-headers

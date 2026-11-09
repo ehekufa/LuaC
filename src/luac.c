@@ -596,7 +596,22 @@ static const char *runtime_header_path(void) {
     const char *environment = getenv("LUAC_RUNTIME");
     char *slash;
     if (environment && *environment) return environment;
-    if (access(LUAC_RUNTIME_PATH, R_OK) == 0) return LUAC_RUNTIME_PATH;
+    if (access(LUAC_RUNTIME_PATH, R_OK) == 0) {
+#ifdef _WIN32
+        const char *path = LUAC_RUNTIME_PATH;
+        char *p;
+        if (isalpha((unsigned char)path[0]) && path[1] == ':' ) return path;
+        if (path[0] == '/' && isalpha((unsigned char)path[1]) && path[2] == '/') {
+            snprintf(resolved, sizeof(resolved), "%c:%s", path[1], path + 2);
+        } else {
+            snprintf(resolved, sizeof(resolved), "%s", path);
+        }
+        for (p = resolved; *p; ++p) if (*p == '\\') *p = '/';
+        return resolved;
+#else
+        return LUAC_RUNTIME_PATH;
+#endif
+    }
     if (luac_executable_path) {
         snprintf(resolved, sizeof(resolved), "%s", luac_executable_path);
         slash = strrchr(resolved, '/');
@@ -722,7 +737,7 @@ static int write_file(const char*path,const char*data,size_t n){FILE*f=fopen(pat
 static char *shell_quote(const char*s){
 #ifdef _WIN32
     Str out;const char*p;sb_init(&out);sb_add(&out,"\"");
-    for(p=s;*p;++p){if(*p=='\"'||*p=='\\')sb_add(&out,"\\");sb_n(&out,p,1);}sb_add(&out,"\"");return out.data;
+    for(p=s;*p;++p){if(*p=='\"')sb_add(&out,"\\");sb_n(&out,p,1);}sb_add(&out,"\"");return out.data;
 #else
     Str out;const char*p;sb_init(&out);sb_add(&out,"'");
     for(p=s;*p;++p){if(*p=='\'')sb_add(&out,"'\\''");else sb_n(&out,p,1);}sb_add(&out,"'");return out.data;
