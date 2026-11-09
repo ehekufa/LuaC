@@ -209,7 +209,10 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           HEAD_SHA: ${{ github.sha }}
         run: |
-          gh run view "$RUN_ID" -R "${{ github.repository }}" --log-failed > /tmp/luac-failures.log 2>&1 || true
+          : > /tmp/luac-failures.log
+          for job in $(gh api repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs --paginate --jq '.jobs[] | select(.conclusion=="failure") | .databaseId'); do
+            gh api repos/${{ github.repository }}/actions/jobs/$job/logs >> /tmp/luac-failures.log 2>&1 || true
+          done
           python3 - <<'PY'
           import json
           from pathlib import Path
