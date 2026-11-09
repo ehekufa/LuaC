@@ -703,6 +703,7 @@ extern char *mkdtemp(char *template_name);
 #endif
 #ifdef _WIN32
 #include <direct.h>
+#include <process.h>
 #define RTLD_NOW 0
 #define RTLD_LOCAL 0
 static HMODULE luac_library;
@@ -777,7 +778,17 @@ int main(int argc,char**argv){
 #endif
       qso=shell_quote(sofile);sb_printf(&cmd,"%s -std=gnu99 -O2 -fPIC -shared %s -o %s -lm",qcc,qc,qso);free(qso);}
      if(getenv("LUAC_TRACE"))fprintf(stderr,"luac: native command: %s\n",cmd.data);
-     cr=run_command(cmd.data);sb_free(&cmd);free(qcc);free(qc);
+#ifdef _WIN32
+     /* Do not pass Windows paths through cmd.exe. _spawnvp quotes each argv
+        element using the C runtime rules, including paths containing spaces. */
+     if(mode==MODE_AOT)cr=(int)_spawnvp(_P_WAIT,cc,(const char *const[]){
+         cc,"-std=gnu99","-O2","-DLUAC_STANDALONE",cfile,"-o",output,"-lm",NULL});
+     else cr=(int)_spawnvp(_P_WAIT,cc,(const char *const[]){
+         cc,"-std=gnu99","-O2","-fPIC","-shared",cfile,"-o",sofile,"-lm",NULL});
+#else
+     cr=run_command(cmd.data);
+#endif
+     sb_free(&cmd);free(qcc);free(qc);
      if(cr!=0){fprintf(stderr,"luac: native compilation failed\n");if(!keep){unlink(cfile);if(sofile)unlink(sofile);rmdir(tmp);}free(cfile);free(sofile);goto done;}
      if(mode==MODE_AOT){printf("built %s\n",output);status=0;if(!keep){unlink(cfile);rmdir(tmp);}free(cfile);goto done;}
      {void*handle=dlopen(sofile,RTLD_NOW|RTLD_LOCAL);int(*entry)(void);
