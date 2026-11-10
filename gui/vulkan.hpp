@@ -4,18 +4,15 @@
 #include <GLFW/glfw3.h>
 #include <string>
 #include <vector>
-
-struct LcVertex {
-    float x, y;
-    float r, g, b, a;
-};
+#include "geometry.hpp"
 
 class VulkanRenderer {
 public:
     VulkanRenderer() = default;
     ~VulkanRenderer();
     void initialize(GLFWwindow *window, const std::string &shaderDirectory);
-    void render(const std::vector<LcVertex> &vertices, int pixelWidth, int pixelHeight);
+    void render(const std::vector<LcVertex> &vertices, const std::vector<LcDraw> &draws,
+                int pixelWidth, int pixelHeight);
     void shutdown();
 
 private:

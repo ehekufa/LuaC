@@ -289,7 +289,7 @@ void VulkanRenderer::createFrameResources() {
     VkFenceCreateInfo fence{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     fence.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     vk(vkCreateFence(device_, &fence, nullptr, &fence_), "Vulkan fence failed");
-    vertexCapacity_ = sizeof(LcVertex) * 200000;
+    vertexCapacity_ = sizeof(LcVertex) * 1000000;
     VkBufferCreateInfo buffer{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     buffer.size = vertexCapacity_;
     buffer.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
@@ -350,8 +350,9 @@ void VulkanRenderer::recreateSwapchain() {
     }
 }
 
-void VulkanRenderer::render(const std::vector<LcVertex> &vertices, int pixelWidth, int pixelHeight) {
-    if (!device_ || vertices.empty() || pixelWidth <= 0 || pixelHeight <= 0) return;
+void VulkanRenderer::render(const std::vector<LcVertex> &vertices, const std::vector<LcDraw> &draws,
+                            int pixelWidth, int pixelHeight) {
+    if (!device_ || vertices.empty() || draws.empty() || pixelWidth <= 0 || pixelHeight <= 0) return;
     if (vertices.size() * sizeof(LcVertex) > vertexCapacity_) throw std::runtime_error("too many GUI vertices");
     vkWaitForFences(device_, 1, &fence_, VK_TRUE, UINT64_MAX);
     vkResetFences(device_, 1, &fence_);
@@ -382,7 +383,17 @@ void VulkanRenderer::render(const std::vector<LcVertex> &vertices, int pixelWidt
     vkCmdPushConstants(commandBuffer_, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(size), size);
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commandBuffer_, 0, 1, &vertexBuffer_, &offset);
-    vkCmdDraw(commandBuffer_, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+    for (const LcDraw &draw : draws) {
+        if (draw.first > vertices.size() || draw.count > vertices.size() - draw.first)
+            throw std::runtime_error("invalid Nuklear Vulkan draw batch");
+        int x = std::max(0, draw.x), y = std::max(0, draw.y);
+        uint32_t right = std::min(extent_.width, static_cast<uint32_t>(std::max(0, draw.x)) + draw.width);
+        uint32_t bottom = std::min(extent_.height, static_cast<uint32_t>(std::max(0, draw.y)) + draw.height);
+        if (static_cast<uint32_t>(x) >= right || static_cast<uint32_t>(y) >= bottom) continue;
+        VkRect2D clip{{x, y}, {right - static_cast<uint32_t>(x), bottom - static_cast<uint32_t>(y)}};
+        vkCmdSetScissor(commandBuffer_, 0, 1, &clip);
+        vkCmdDraw(commandBuffer_, draw.count, 1, draw.first, 0);
+    }
     vkCmdEndRenderPass(commandBuffer_);
     vkEndCommandBuffer(commandBuffer_);
     VkPipelineStageFlags wait = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;

@@ -105,7 +105,21 @@ Workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) запус
 
 ## LuaC Studio — Vulkan GUI
 
-Desktop-редактор написан на C++17 без ImGui: GLFW создаёт окно, а собственный Vulkan renderer выводит swapchain, graphics pipeline, цветные панели и bitmap-font.
+Desktop-редактор использует **Nuklear (C99, Immediate Mode) + собственный Vulkan renderer**. GLFW создаёт окно и передаёт input в Nuklear; layout, кнопки, multiline editor, selection, undo/redo, clipboard и scrolling обрабатывает Nuklear. Адаптер `gui/nuklear_canvas.hpp` преобразует его draw commands в geometry с Vulkan scissor-батчами.
+
+Для Nuklear один раз выделяется фиксированная arena размером 4 MiB: скрытого рантайма, JavaScript-движка, Lua VM и выделений Nuklear в каждом кадре нет. В Studio настроены тёмная тема, округлые controls и цветовые hover/active-состояния. Внешний вид не зависит от JavaFX или CSS.
+
+Типичный Immediate Mode код выглядит так:
+
+```c
+if (nk_begin(&ui, "Toolbar", nk_rect(0, 0, width, 64), NK_WINDOW_BACKGROUND)) {
+    nk_layout_row_dynamic(&ui, 38, 1);
+    if (nk_button_label(&ui, "Run")) run();
+}
+nk_end(&ui);
+```
+
+Зависимость закреплена в `gui/third_party/nuklear.h`; исходный upstream commit и лицензия указаны рядом с header. Bitmap-renderer сохраняет UTF-8 в файле, но пока отображает не-ASCII символы как `?`; полноценный font atlas можно добавить отдельно без изменения языка или compiler runtime.
 
 ```sh
 # Debian/Ubuntu
@@ -119,7 +133,9 @@ make gui
 - **F5** — сохранить при необходимости и запустить через JIT;
 - **F6** — проверить синтаксис;
 - **Ctrl+S** — сохранить;
-- мышь и клавиатура — редактирование исходника.
+- **Ctrl+C / Ctrl+X / Ctrl+V** — clipboard;
+- **Ctrl+Z / Ctrl+Y** — undo / redo;
+- мышь, колёсико и клавиатура — редактирование исходника.
 
 Пути можно переопределить переменными `LUAC_COMPILER`, `LUAC_SHADER_DIR` и `LUAC_RUNTIME`. В пакетах shaders находятся в `build/`, поэтому GUI следует запускать из корня распакованного пакета.
 
@@ -156,14 +172,15 @@ make test
 SANITIZE=1 make test  # дополнительно ASan/UBSan, если компилятор их поддерживает
 ```
 
-Тесты прогоняют один набор программ через JIT и AOT, проверяют генерацию C, диагностику неправильного кода, замыкания, множественные значения, таблицы, циклы и обработку ошибок.
+Тесты прогоняют один набор программ через JIT и AOT, проверяют генерацию C, диагностику неправильного кода, замыкания, множественные значения, таблицы, циклы и обработку ошибок. Отдельный headless UI-test без дисплея и GPU проверяет fixed arena Nuklear, input кнопки, multiline editing, draw commands, Vulkan vertices и scissor-батчи.
 
 ## Устройство проекта
 
 - `src/luac.c` — lexer, parser, AST, генератор C, JIT-loader, C API и CLI;
 - `src/luac.h` — публичный API библиотеки;
 - `src/runtime.h` — значения, таблицы, функции, ownership runtime и стандартная библиотека;
-- `gui/` — desktop Vulkan renderer, редактор и GLSL shaders;
+- `gui/` — Nuklear editor, command→geometry adapter, desktop Vulkan renderer и GLSL shaders;
+- `gui/third_party/` — pinned Nuklear single-header distribution и лицензия;
 - `android/` — APK, Java UI, JNI и Android Vulkan renderer;
 - `.github/workflows/build.yml` — тесты и кроссплатформенные артефакты;
 - `examples/demo.lua` — пример;

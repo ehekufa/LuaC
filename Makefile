@@ -50,16 +50,23 @@ $(BUILD)/libluac.a: $(BUILD)/luac.o
 $(BUILD)/libluac.$(SHARED_EXT): $(BUILD)/luac.o
 	$(CC) $(SHARED_FLAG) $< -o $@
 
+# Nuklear stays C99 and uses only the fixed arena supplied by the Studio.
+$(BUILD)/nuklear.o: gui/nuklear_impl.c gui/third_party/nuklear.h | $(BUILD)
+	$(CC) -std=c99 $(CFLAGS) $(WARNINGS) -I gui -c gui/nuklear_impl.c -o $@
+
+$(BUILD)/ui-test$(EXE): tests/ui_test.cpp gui/nuklear_canvas.hpp gui/geometry.hpp $(BUILD)/nuklear.o
+	$(CXX) -std=c++17 $(CXXFLAGS) $(WARNINGS) -I gui tests/ui_test.cpp $(BUILD)/nuklear.o -o $@
+
 # Optional desktop Vulkan editor. Requires glfw3, vulkan and glslangValidator.
 $(BUILD)/shader.vert.spv: gui/shader.vert | $(BUILD)
 	glslangValidator -V $< -o $@
 $(BUILD)/shader.frag.spv: gui/shader.frag | $(BUILD)
 	glslangValidator -V $< -o $@
 
-gui: $(BUILD)/shader.vert.spv $(BUILD)/shader.frag.spv
-	$(CXX) -std=c++17 $(CXXFLAGS) $(GUI_CFLAGS) -I src -I gui gui/app.cpp gui/vulkan.cpp -o $(BUILD)/luac-gui$(EXE) $(GUI_LIBS)
+gui: $(BUILD)/shader.vert.spv $(BUILD)/shader.frag.spv $(BUILD)/nuklear.o
+	$(CXX) -std=c++17 $(CXXFLAGS) $(GUI_CFLAGS) -I src -I gui gui/app.cpp gui/vulkan.cpp $(BUILD)/nuklear.o -o $(BUILD)/luac-gui$(EXE) $(GUI_LIBS)
 
-test: luac
+test: luac $(BUILD)/ui-test$(EXE)
 	./tests/run.sh
 
 install: src/luac.c src/luac.h src/runtime.h libraries

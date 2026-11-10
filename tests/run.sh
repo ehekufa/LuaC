@@ -15,6 +15,7 @@ cmp tests/.tmp/expected.out tests/.tmp/aot.out
 make libraries >/dev/null
 cc -std=c99 -Isrc tests/api_test.c build/libluac.a -o tests/.tmp/api-test
 tests/.tmp/api-test
+./build/ui-test
 
 ./luac --emit-c examples/demo.lua -o tests/.tmp/demo.c >/dev/null
 grep -q 'lc_jit_main' tests/.tmp/demo.c

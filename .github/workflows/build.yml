@@ -113,6 +113,7 @@ jobs:
         run: |
           mkdir -p dist/studio-linux/build
           cp luac build/luac-gui src/runtime.h README.md LICENSE dist/studio-linux/
+          cp gui/third_party/Nuklear-LICENSE dist/studio-linux/
           cp build/*.spv dist/studio-linux/build/
           cp -r examples dist/studio-linux/
           tar -C dist -czf dist/LuaC-Studio-linux-x86_64.tar.gz studio-linux
@@ -151,6 +152,7 @@ jobs:
         run: |
           mkdir -p dist/studio-windows/build
           cp luac.exe build/luac-gui.exe src/runtime.h README.md LICENSE dist/studio-windows/
+          cp gui/third_party/Nuklear-LICENSE dist/studio-windows/
           cp /ucrt64/bin/glfw3.dll dist/studio-windows/
           if [ -f /ucrt64/bin/vulkan-1.dll ]; then cp /ucrt64/bin/vulkan-1.dll dist/studio-windows/; fi
           cp build/*.spv dist/studio-windows/build/
