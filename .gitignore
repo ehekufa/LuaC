@@ -6,6 +6,7 @@ tests/.tmp/
 *.o
 core
 build/
+/build-*/
 dist/
 android/.gradle/
 android/build/

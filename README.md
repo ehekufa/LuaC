@@ -11,7 +11,7 @@
 
 ## Быстрый старт
 
-Нужны компилятор C с поддержкой GNU C99 и POSIX-система (`dlopen`, `mkdtemp`). Зависимостей от Lua нет.
+Нужен компилятор C с поддержкой GNU C99. Поддерживаются Linux, macOS и Windows/MinGW; JIT использует native shared library, AOT — обычный executable. Зависимостей от Lua и LuaJIT нет.
 
 ```sh
 make
@@ -61,13 +61,22 @@ lc_done:
 - `nil`, boolean, числа, строки, escape-последовательности и длинные строки;
 - локальные и глобальные переменные, множественное присваивание;
 - арифметика `+ - * / // % ^`, сравнения, `#`, `..`, `and`, `or`, `not`;
-- `if / elseif / else`, `while`, `repeat`, `break`;
+- bitwise `& | ~ << >>`, unary `~`, включая соответствующие metamethods;
+- `if / elseif / else`, `while`, `repeat`, `break`, `goto` и `::labels::`;
 - числовой и generic `for`;
 - функции, рекурсия, анонимные функции, методы `:`, замыкания и изменяемые upvalues;
 - varargs `...` и множественные возвращаемые значения;
 - таблицы, array/named/keyed-поля, `pairs`, `ipairs`, `next`;
-- `pcall`, `assert`, `error`, `select`, `type`, `tostring`, `tonumber`;
-- базовые модули `math`, `string`, `table`, а также `io.write`, `os.clock`, `os.time`.
+- metatables: `__index`, `__newindex`, `__call`, `__len`, `__tostring`, `__pairs`, arithmetic/comparison/concat/bitwise metamethods;
+- raw API, `_G`, `pcall`, `xpcall`, `assert`, `error`, `select`, `type`, `tostring`, `tonumber`;
+- `string`: byte/char/sub/rep/reverse/case/format, собственный Lua pattern engine для `find`, `match`, `gmatch`, `gsub` (classes, captures, sets, quantifiers, anchors, backreferences, `%b`, `%f`);
+- `table`: insert/remove/concat/pack/unpack/move/sort;
+- `math`: базовые и hyperbolic functions, fmod/modf/frexp/ldexp, random, conversion helpers;
+- LuaJIT `bit`, Lua-compatible `bit32`, строгий UTF-8 через `utf8.char/len/codepoint/offset/codes`;
+- файлы и процессы через `io.open/read/write/lines/seek/setvbuf/popen`, стандартные потоки и детерминированное закрытие;
+- `os.date/time/difftime/getenv/remove/rename/tmpname/execute/exit/setlocale`;
+- native modules через `package.preload`, `package.loaded` и `require`;
+- `collectgarbage` как compatibility API для метрик/состояния, без запуска скрытого collector.
 
 Пример — обычный `.lua`:
 
@@ -86,7 +95,23 @@ print(next(5), next(2)) -- 15  17
 
 ## Границы текущей версии
 
-Это работающее ядро компилятора, **пока не полная drop-in реализация Lua 5.4**. Метатаблицы, coroutines, модули `require`, `load`/`dofile`, `goto`, целочисленный подтип и bitwise-операторы ещё не реализованы. Стандартная библиотека покрыта частично. Эти ограничения указаны явно: LuaC не претендует на запуск любого существующего Lua-проекта без изменений.
+Это работающий native compiler, **но ещё не полная drop-in замена Lua 5.4/LuaJIT**. Текущая матрица честно фиксирует границы:
+
+| Возможность | Статус |
+|---|---|
+| Lua VM, bytecode VM, AST interpreter | Нет и не планируется |
+| Native JIT/AOT | Работает |
+| Metatables, bitwise, `goto` | Работают |
+| Coroutines/`yield` | Ещё не реализованы |
+| Runtime `load`, `loadstring`, `dofile` | Ещё не реализованы; compilation происходит через compiler API/CLI |
+| `require` | Работает для `package.preload`; динамический поиск и загрузка файлов пока не подключены |
+| LuaJIT FFI | Ещё не реализован |
+| `debug` library, `string.dump`, `string.pack/unpack/packsize` | Ещё не реализованы |
+| Раздельные integer/float subtypes | Пока единый `double`; bitwise преобразует к integer по правилам runtime |
+| `math.maxinteger/mininteger` | Безопасный exactly representable диапазон ±2^53−1, не полный int64 |
+| JIT tracing LuaJIT | Не копируется; LuaC компилирует функции в обычный машинный код через C compiler |
+
+То есть LuaC пока не запустит любой Lua/LuaJIT-проект без изменений. Отсутствующие возможности не маскируются заглушками. Исходники Lua/LuaJIT могут изучаться как поведенческий референс, но не копируются, не вендорятся и не линкуются.
 
 ## Готовые сборки через GitHub Actions
 
@@ -94,6 +119,7 @@ Workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) запус
 
 | Артефакт | Содержимое |
 |---|---|
+| `LuaC-source` | Полный архив именно нашей реализации для копирования в свой build |
 | `LuaC-windows-x86_64` | `luac.exe`, статическая и динамическая библиотеки, headers |
 | `LuaC-linux-x86_64` | CLI, `libluac.a`, `libluac.so`, headers |
 | `LuaC-macos-arm64` | CLI, `libluac.a`, `libluac.dylib`, headers |
@@ -165,6 +191,51 @@ luac_free(error);
 
 Также доступны `luac_check`, `luac_version` и `luac_free`. Тот же API используется Android JNI и может подключаться к C/C++-проектам.
 
+## Копирование в собственный build
+
+Lua/LuaJIT не скачиваются и не подключаются. Можно скопировать только **наши** файлы `src/luac.c`, `src/luac.h` и `src/runtime.h`:
+
+```sh
+cc -std=gnu99 -DLUAC_LIBRARY_ONLY -DLUAC_RUNTIME_PATH=\"runtime.h\" \
+  -I path/to/luac/src -c path/to/luac/src/luac.c -o luac.o
+cc your_program.c luac.o -o your_program
+```
+
+Для generated C добавьте include path к каталогу с `runtime.h` и `-DLUAC_STANDALONE`, если нужен автоматический `main`.
+
+### CMake `add_subdirectory`
+
+Скопируйте репозиторий или каталог LuaC в проект:
+
+```cmake
+add_subdirectory(third_party/LuaC)
+target_link_libraries(your_target PRIVATE LuaC::luac)
+# LuaC::compiler также доступен для custom commands с --emit-c/--aot.
+```
+
+### Установленный CMake package
+
+```sh
+cmake -S . -B build-cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build-cmake -j2
+cmake --install build-cmake --prefix /your/prefix
+```
+
+В другом проекте:
+
+```cmake
+find_package(LuaC 0.3 CONFIG REQUIRED)
+target_link_libraries(your_target PRIVATE LuaC::luac)
+```
+
+Передайте `-DCMAKE_PREFIX_PATH=/your/prefix`. Установленный CLI ищет `../share/luac/runtime.h`, library генерирует переносимый `#include "runtime.h"`; абсолютный build path в чужой проект не требуется. Дополнительно устанавливается `lib/pkgconfig/luac.pc`:
+
+```sh
+cc your_program.c $(pkg-config --cflags --libs luac) -o your_program
+```
+
+Полный consumer example находится в [`examples/embed`](examples/embed): он проверяет и `LuaC::luac`, и custom command `LuaC::compiler`, и запуск native executable, собранного из generated C. Артефакт `LuaC-source` содержит весь наш source tree через `git archive`, без upstream Lua/LuaJIT.
+
 ## Тесты
 
 ```sh
@@ -172,18 +243,20 @@ make test
 SANITIZE=1 make test  # дополнительно ASan/UBSan, если компилятор их поддерживает
 ```
 
-Тесты прогоняют один набор программ через JIT и AOT, проверяют генерацию C, диагностику неправильного кода, замыкания, множественные значения, таблицы, циклы и обработку ошибок. Отдельный headless UI-test без дисплея и GPU проверяет fixed arena Nuklear, input кнопки, multiline editing, draw commands, Vulkan vertices и scissor-батчи.
+`tests/features.lua` и `tests/compat.lua` прогоняются через JIT и AOT. Compatibility suite покрывает bitwise/goto/metatables, raw API, patterns, bit/bit32, table/math/string, UTF-8, IO/OS и package.preload. Sanitizer job запускает generated native code под ASan/UBSan/LeakSanitizer. Отдельный headless UI-test без дисплея и GPU проверяет fixed arena Nuklear, input кнопки, multiline editing, draw commands, Vulkan vertices и scissor-батчи. CMake/CTest повторяет проверки и дополнительно собирает независимый consumer после install.
 
 ## Устройство проекта
 
 - `src/luac.c` — lexer, parser, AST, генератор C, JIT-loader, C API и CLI;
 - `src/luac.h` — публичный API библиотеки;
-- `src/runtime.h` — значения, таблицы, функции, ownership runtime и стандартная библиотека;
+- `src/runtime.h` — значения, metatables, файлы, ownership runtime и стандартные библиотеки;
+- `CMakeLists.txt`, `cmake/` — build/install/export package и AOT CTest;
+- `examples/embed/` — независимый consumer для CMake package;
 - `gui/` — Nuklear editor, command→geometry adapter, desktop Vulkan renderer и GLSL shaders;
 - `gui/third_party/` — pinned Nuklear single-header distribution и лицензия;
 - `android/` — APK, Java UI, JNI и Android Vulkan renderer;
 - `.github/workflows/build.yml` — тесты и кроссплатформенные артефакты;
 - `examples/demo.lua` — пример;
-- `tests/features.lua` — проверка языка и runtime.
+- `tests/features.lua`, `tests/compat.lua` — проверка языка, runtime и стандартных библиотек.
 
 Лицензия проекта находится в `LICENSE`.

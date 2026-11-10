@@ -20,7 +20,7 @@
 #define LUAC_RUNTIME_PATH "src/runtime.h"
 #endif
 
-#define LUAC_VERSION "0.2.0"
+#define LUAC_VERSION "0.3.0"
 #include "luac.h"
 
 typedef struct { char *data; size_t len, cap; } Str;
@@ -49,7 +49,8 @@ typedef enum {
     T_PLUS, T_MINUS, T_STAR, T_SLASH, T_DSLASH, T_PERCENT, T_CARET,
     T_HASH, T_EQ, T_NE, T_LE, T_GE, T_LT, T_GT, T_ASSIGN,
     T_LPAREN, T_RPAREN, T_LBRACE, T_RBRACE, T_LBRACKET, T_RBRACKET,
-    T_SEMI, T_COLON, T_COMMA, T_DOT, T_CONCAT, T_DOTS
+    T_SEMI, T_COLON, T_COMMA, T_DOT, T_CONCAT, T_DOTS,
+    T_BAND, T_BOR, T_BNOT, T_SHL, T_SHR, T_GOTO, T_DBCOLON
 } TokenKind;
 
 typedef struct {
@@ -91,7 +92,7 @@ static const char *token_name(TokenKind k) {
         "eof","name","number","string","nil","true","false","function","local","end","if","then",
         "elseif","else","while","do","for","in","repeat","until","return","break","and","or","not",
         "+","-","*","/","//","%","^","#","==","~=","<=",">=","<",">","=","(",")","{","}","[","]",
-        ";",":",",",".","..","..."
+        ";",":",",",".","..","...","&","|","~","<<",">>","goto","::"
     };
     return names[(int)k];
 }
@@ -140,7 +141,7 @@ again:
             {"nil",T_NIL},{"true",T_TRUE},{"false",T_FALSE},{"function",T_FUNCTION},{"local",T_LOCAL},
             {"end",T_END},{"if",T_IF},{"then",T_THEN},{"elseif",T_ELSEIF},{"else",T_ELSE},{"while",T_WHILE},
             {"do",T_DO},{"for",T_FOR},{"in",T_IN},{"repeat",T_REPEAT},{"until",T_UNTIL},{"return",T_RETURN},
-            {"break",T_BREAK},{"and",T_AND},{"or",T_OR},{"not",T_NOT},{NULL,T_EOF}
+            {"break",T_BREAK},{"goto",T_GOTO},{"and",T_AND},{"or",T_OR},{"not",T_NOT},{NULL,T_EOF}
         };
         int i;
         while (is_name_char(peek(p))) take(p);
@@ -193,14 +194,15 @@ again:
 #define OP1(ch, k) case ch: take(p); p->token.kind = (k); return
     switch (peek(p)) {
         OP1('+',T_PLUS); OP1('-',T_MINUS); OP1('*',T_STAR); OP1('%',T_PERCENT); OP1('^',T_CARET);
-        OP1('#',T_HASH); OP1('(',T_LPAREN); OP1(')',T_RPAREN);
+        OP1('#',T_HASH); OP1('&',T_BAND); OP1('|',T_BOR); OP1('(',T_LPAREN); OP1(')',T_RPAREN);
         OP1('{',T_LBRACE); OP1('}',T_RBRACE); OP1('[',T_LBRACKET); OP1(']',T_RBRACKET);
-        OP1(';',T_SEMI); OP1(':',T_COLON); OP1(',',T_COMMA);
+        OP1(';',T_SEMI); OP1(',',T_COMMA);
+        case ':': take(p); if (peek(p)==':') { take(p); p->token.kind=T_DBCOLON; } else p->token.kind=T_COLON; return;
         case '/': take(p); if (peek(p)=='/') { take(p); p->token.kind=T_DSLASH; } else p->token.kind=T_SLASH; return;
         case '=': take(p); if (peek(p)=='=') { take(p); p->token.kind=T_EQ; } else p->token.kind=T_ASSIGN; return;
-        case '~': take(p); if (peek(p)=='=') { take(p); p->token.kind=T_NE; } else parse_error(p,"unexpected '~'"); return;
-        case '<': take(p); if (peek(p)=='=') { take(p); p->token.kind=T_LE; } else p->token.kind=T_LT; return;
-        case '>': take(p); if (peek(p)=='=') { take(p); p->token.kind=T_GE; } else p->token.kind=T_GT; return;
+        case '~': take(p); if (peek(p)=='=') { take(p); p->token.kind=T_NE; } else p->token.kind=T_BNOT; return;
+        case '<': take(p); if (peek(p)=='=') { take(p); p->token.kind=T_LE; } else if (peek(p)=='<') { take(p); p->token.kind=T_SHL; } else p->token.kind=T_LT; return;
+        case '>': take(p); if (peek(p)=='=') { take(p); p->token.kind=T_GE; } else if (peek(p)=='>') { take(p); p->token.kind=T_SHR; } else p->token.kind=T_GT; return;
         case '.': take(p); if (peek(p)=='.') { take(p); if (peek(p)=='.') { take(p); p->token.kind=T_DOTS; } else p->token.kind=T_CONCAT; } else p->token.kind=T_DOT; return;
         default: parse_error(p, "unexpected character '%c'", peek(p)); take(p); return;
     }
@@ -223,7 +225,7 @@ struct Expr {
     char **params; int nparams;
     Stmt *body;
 };
-typedef enum { S_LOCAL,S_ASSIGN,S_EXPR,S_IF,S_WHILE,S_REPEAT,S_FORNUM,S_FORIN,S_RETURN,S_BREAK,S_DO,S_LOCALFUNC } StmtKind;
+typedef enum { S_LOCAL,S_ASSIGN,S_EXPR,S_IF,S_WHILE,S_REPEAT,S_FORNUM,S_FORIN,S_RETURN,S_BREAK,S_DO,S_LOCALFUNC,S_GOTO,S_LABEL } StmtKind;
 struct Stmt {
     StmtKind kind; int line; Stmt *next;
     char **names; int nnames;
@@ -318,10 +320,12 @@ static Expr *parse_subexpr_tail(Parser *p, Expr *left, int limit) {
             case T_OR:lp=1;rp=1;op=14;break; case T_AND:lp=2;rp=2;op=15;break;
             case T_LT:lp=3;rp=3;op=9;break; case T_LE:lp=3;rp=3;op=10;break; case T_GT:lp=3;rp=3;op=11;break; case T_GE:lp=3;rp=3;op=12;break;
             case T_EQ:lp=3;rp=3;op=7;break; case T_NE:lp=3;rp=3;op=8;break;
-            case T_CONCAT:lp=4;rp=3;op=13;break;
-            case T_PLUS:lp=5;rp=5;op=0;break; case T_MINUS:lp=5;rp=5;op=1;break;
-            case T_STAR:lp=6;rp=6;op=2;break; case T_SLASH:lp=6;rp=6;op=3;break; case T_DSLASH:lp=6;rp=6;op=4;break; case T_PERCENT:lp=6;rp=6;op=5;break;
-            case T_CARET:lp=8;rp=7;op=6;break; default:break;
+            case T_BOR:lp=4;rp=4;op=17;break; case T_BNOT:lp=5;rp=5;op=18;break;
+            case T_BAND:lp=6;rp=6;op=16;break; case T_SHL:lp=7;rp=7;op=19;break; case T_SHR:lp=7;rp=7;op=20;break;
+            case T_CONCAT:lp=8;rp=7;op=13;break;
+            case T_PLUS:lp=9;rp=9;op=0;break; case T_MINUS:lp=9;rp=9;op=1;break;
+            case T_STAR:lp=10;rp=10;op=2;break; case T_SLASH:lp=10;rp=10;op=3;break; case T_DSLASH:lp=10;rp=10;op=4;break; case T_PERCENT:lp=10;rp=10;op=5;break;
+            case T_CARET:lp=12;rp=11;op=6;break; default:break;
         }
         if (op<0 || lp<=limit) break;
         next_token(p); { Expr *b=new_expr(p,E_BINARY); b->op=op; b->a=left; b->b=parse_subexpr(p,rp); left=b; }
@@ -330,9 +334,9 @@ static Expr *parse_subexpr_tail(Parser *p, Expr *left, int limit) {
 }
 static Expr *parse_subexpr(Parser *p,int limit) {
     Expr *left;
-    if (p->token.kind==T_NOT || p->token.kind==T_MINUS || p->token.kind==T_HASH) {
-        int op=p->token.kind==T_NOT?0:p->token.kind==T_MINUS?1:2;
-        next_token(p); left=new_expr(p,E_UNARY); left->op=op; left->a=parse_subexpr(p,7);
+    if (p->token.kind==T_NOT || p->token.kind==T_MINUS || p->token.kind==T_HASH || p->token.kind==T_BNOT) {
+        int op=p->token.kind==T_NOT?0:p->token.kind==T_MINUS?1:p->token.kind==T_HASH?2:4;
+        next_token(p); left=new_expr(p,E_UNARY); left->op=op; left->a=parse_subexpr(p,11);
     } else left=parse_primary(p);
     return parse_subexpr_tail(p,left,limit);
 }
@@ -384,6 +388,8 @@ static Stmt *parse_statement(Parser *p) {
     }
     if (accept_token(p,T_RETURN)) { Stmt*s=new_stmt(p,S_RETURN);s->line=line;if(!block_end(p->token.kind)&&p->token.kind!=T_SEMI)parse_expr_list(p,&s->exprs,&s->nexprs);accept_token(p,T_SEMI);return s; }
     if (accept_token(p,T_BREAK)) { Stmt*s=new_stmt(p,S_BREAK);s->line=line;return s; }
+    if (accept_token(p,T_GOTO)) { Stmt*s=new_stmt(p,S_GOTO);s->line=line;name_list_add(&s->names,&s->nnames,expect_name(p));return s; }
+    if (accept_token(p,T_DBCOLON)) { Stmt*s=new_stmt(p,S_LABEL);s->line=line;name_list_add(&s->names,&s->nnames,expect_name(p));expect(p,T_DBCOLON);return s; }
     {
         Expr *first=parse_primary(p);
         if(p->token.kind==T_ASSIGN||p->token.kind==T_COMMA){
@@ -529,7 +535,7 @@ static void cg_stmt(Cf*f,Stmt*s){
                 else{char*obj=cg_expr(f,s->expr->a),*key=cg_expr(f,s->expr->b),*v=cg_expr(f,s->expr2);sb_printf(&f->body,"    lc_table_set(ctx, %s, %s, %s);\n",obj,key,v);cg_release(f,obj);cg_release(f,key);cg_release(f,v);}free(rhs);break;}
             for(i=0;i<nr;++i)rhs[i]=cg_expr(f,s->exprs[nt+i]);
             for(i=0;i<nt;++i){Expr*target=s->exprs[i];int ri=i<nr-1?i:nr-1,idx=i<nr-1?0:i-(nr-1);char*v=cf_new_temp(f);if(ri<0)sb_printf(&f->body,"    %s = lc_nil();\n",v);else sb_printf(&f->body,"    %s = lc_nth(%s, %d);\n",v,rhs[ri],idx);
-                if(target->kind==E_VAR){Symbol*sym=cf_resolve(f,target->name);if(sym->kind==SYM_GLOBAL){char*k=cf_new_temp(f);sb_printf(&f->body,"    %s = lc_string(ctx, \"%s\");\n",k,target->name);sb_printf(&f->body,"    lc_table_set(ctx, ctx->globals, %s, %s);\n",k,v);cg_release(f,k);}else sb_printf(&f->body,"    lc_cell_set(ctx, %s, %s);\n",sym->cname,v);cg_release(f,v);}
+                if(target->kind==E_VAR){Symbol*sym=cf_resolve(f,target->name);if(sym->kind==SYM_GLOBAL){char*k=cf_new_temp(f);sb_printf(&f->body,"    %s = lc_string(ctx, \"%s\");\n",k,target->name);sb_printf(&f->body,"    lc_table_set(ctx, ctx->globals, %s, %s);\n",k,v);cg_release(f,k);}else sb_printf(&f->body,"    lc_cell_set(ctx, %s, %s); %s = lc_nil();\n",sym->cname,v,v);cg_release(f,v);}
                 else if(target->kind==E_INDEX){char*obj=cg_expr(f,target->a),*key=cg_expr(f,target->b);sb_printf(&f->body,"    lc_table_set(ctx, %s, %s, %s);\n",obj,key,v);cg_release(f,obj);cg_release(f,key);cg_release(f,v);}else{f->cg->failed=1;fprintf(stderr,"%s:%d: invalid assignment target\n",f->cg->parser->filename,s->line);cg_release(f,v);}}
             for(i=0;i<nr;++i){cg_release(f,rhs[i]);}free(rhs);break;}
         case S_EXPR:t=cg_expr(f,s->expr);cg_release(f,t);break;
@@ -567,6 +573,8 @@ static void cg_stmt(Cf*f,Stmt*s){
             if(!f->loop_depth){f->cg->failed=1;fprintf(stderr,"%s:%d: 'break' outside a loop\n",f->cg->parser->filename,s->line);}
             else sb_add(&f->body,"    break;\n");
             break;
+        case S_GOTO:sb_printf(&f->body,"    goto lc_user_label_%s;\n",s->names[0]);break;
+        case S_LABEL:sb_printf(&f->body,"lc_user_label_%s: ;\n",s->names[0]);break;
         default:break;
     }
     cg_check(f);
@@ -619,8 +627,18 @@ static const char *runtime_header_path(void) {
         { char *backslash = strrchr(resolved, '\\'); if (backslash && (!slash || backslash > slash)) slash = backslash; }
 #endif
         if (slash) {
+            size_t directory_length = (size_t)(slash - resolved);
             *slash = 0;
             { size_t used = strlen(resolved); snprintf(resolved + used, sizeof(resolved) - used, "/runtime.h"); }
+            if (access(resolved, R_OK) == 0) {
+#ifdef _WIN32
+                char *p; for (p = resolved; *p; ++p) if (*p == '\\') *p = '/';
+#endif
+                return resolved;
+            }
+            /* Relocatable install: PREFIX/bin/luac -> PREFIX/share/luac. */
+            resolved[directory_length] = 0;
+            snprintf(resolved + directory_length, sizeof(resolved) - directory_length, "/../share/luac/runtime.h");
             if (access(resolved, R_OK) == 0) {
 #ifdef _WIN32
                 char *p; for (p = resolved; *p; ++p) if (*p == '\\') *p = '/';
