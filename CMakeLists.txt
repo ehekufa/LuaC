@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LuaC VERSION 0.3.0 LANGUAGES C CXX)
+project(LuaC VERSION 0.4.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -10,6 +10,15 @@ option(LUAC_BUILD_UI_TESTS "Build the headless Nuklear command adapter test" ON)
 
 add_library(luac_library src/luac.c)
 add_library(LuaC::luac ALIAS luac_library)
+add_library(luac_engine INTERFACE)
+add_library(LuaC::engine ALIAS luac_engine)
+set_target_properties(luac_engine PROPERTIES EXPORT_NAME engine)
+target_include_directories(luac_engine INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_compile_features(luac_engine INTERFACE cxx_std_17)
+
 set_target_properties(luac_library PROPERTIES
     OUTPUT_NAME luac
     EXPORT_NAME luac
@@ -58,6 +67,9 @@ if(BUILD_TESTING)
     add_executable(luac-api-test tests/api_test.c)
     target_link_libraries(luac-api-test PRIVATE luac_library)
     add_test(NAME luac-c-api COMMAND luac-api-test)
+    add_executable(luac-engine-test tests/engine_test.cpp)
+    target_link_libraries(luac-engine-test PRIVATE luac_engine)
+    add_test(NAME luac-native-engine COMMAND luac-engine-test)
 
     if(LUAC_BUILD_CLI)
         add_test(NAME luac-compat-jit COMMAND luac_compiler
@@ -72,6 +84,21 @@ if(BUILD_TESTING)
                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/compat.lua
                 -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/luac-compat-aot
                 -DWORKDIR=${CMAKE_CURRENT_SOURCE_DIR}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunAotTest.cmake
+        )
+        add_test(NAME luac-libraries-jit COMMAND luac_compiler
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/libraries.lua")
+        set_tests_properties(luac-libraries-jit PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            PASS_REGULAR_EXPRESSION "LuaC extended libraries: OK"
+        )
+        add_test(NAME luac-libraries-aot
+            COMMAND ${CMAKE_COMMAND}
+                -DLUAC=$<TARGET_FILE:luac_compiler>
+                -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/libraries.lua
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/luac-libraries-aot
+                -DWORKDIR=${CMAKE_CURRENT_SOURCE_DIR}
+                -DEXPECTED=LuaC.extended.libraries:.OK
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunAotTest.cmake
         )
     endif()
@@ -95,7 +122,7 @@ write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/LuaCConfigVersion.
     COMPATIBILITY SameMajorVersion
 )
 
-install(TARGETS luac_library
+install(TARGETS luac_library luac_engine
     EXPORT LuaCTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -111,8 +138,8 @@ install(EXPORT LuaCTargets
     NAMESPACE LuaC::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LuaC
 )
-install(FILES src/luac.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES src/runtime.h DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)
+install(FILES src/luac.h src/engine.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES src/runtime.h src/luac_libraries.h DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/LuaCConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/LuaCConfigVersion.cmake"

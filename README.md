@@ -76,7 +76,11 @@ lc_done:
 - файлы и процессы через `io.open/read/write/lines/seek/setvbuf/popen`, стандартные потоки и детерминированное закрытие;
 - `os.date/time/difftime/getenv/remove/rename/tmpname/execute/exit/setlocale`;
 - native modules через `package.preload`, `package.loaded` и `require`;
+- **13 дополнительных native-модулей / 151 API**: `text`, `hex`, `base64`, `url`, `json`, `hash`, `fs`, `path`, `time`, `vec`, `socket`, `http`, `engine`;
+- TCP/UDP/DNS, binary files, JSON Unicode, SHA-256/HMAC, vector math и scene simulation доступны и в JIT, и в AOT;
 - `collectgarbage` как compatibility API для метрик/состояния, без запуска скрытого collector.
+
+Полный список функций и ограничений — [`docs/LIBRARIES.md`](docs/LIBRARIES.md). Готовые примеры: [`examples/data.lua`](examples/data.lua), [`examples/network.lua`](examples/network.lua), [`examples/game.lua`](examples/game.lua). Встроенные модули одновременно доступны как globals и через `require("json")`, `require("socket")` и т.д.
 
 Пример — обычный `.lua`:
 
@@ -106,6 +110,8 @@ print(next(5), next(2)) -- 15  17
 | Runtime `load`, `loadstring`, `dofile` | Ещё не реализованы; compilation происходит через compiler API/CLI |
 | `require` | Работает для `package.preload`; динамический поиск и загрузка файлов пока не подключены |
 | LuaJIT FFI | Ещё не реализован |
+| HTTPS/TLS | Ещё нет; native HTTP/1.1 работает только для явного `http://` |
+| Engine | Native 2D world/simulation и Studio viewport работают; audio/physics solver/asset pipeline не заявляются готовыми |
 | `debug` library, `string.dump`, `string.pack/unpack/packsize` | Ещё не реализованы |
 | Раздельные integer/float subtypes | Пока единый `double`; bitwise преобразует к integer по правилам runtime |
 | `math.maxinteger/mininteger` | Безопасный exactly representable диапазон ±2^53−1, не полный int64 |
@@ -158,12 +164,20 @@ make gui
 
 - **F5** — сохранить при необходимости и запустить через JIT;
 - **F6** — проверить синтаксис;
+- **F7** — переключить Editor/Engine;
+- **Space в Engine** — play/pause simulation;
 - **Ctrl+S** — сохранить;
 - **Ctrl+C / Ctrl+X / Ctrl+V** — clipboard;
 - **Ctrl+Z / Ctrl+Y** — undo / redo;
 - мышь, колёсико и клавиатура — редактирование исходника.
 
 Пути можно переопределить переменными `LUAC_COMPILER`, `LUAC_SHADER_DIR` и `LUAC_RUNTIME`. В пакетах shaders находятся в `build/`, поэтому GUI следует запускать из корня распакованного пакета.
+
+### Engine mode в Studio
+
+Кнопка **Engine** (или F7) открывает scene workspace: hierarchy, Vulkan viewport и inspector. Можно добавлять, дублировать, выбирать и удалять entities; редактировать position, velocity, size, rotation, scale, color, active/kinematic; запускать play/pause, отдельный fixed step и reset. Viewport отображает grid, sprites, selection и collisions, simulation использует deterministic 60 Hz fixed-step core.
+
+Это не отдельный закрытый редактор: тот же native world доступен в Lua через `engine`, а C++17 header `src/engine.hpp` подключается к любому проекту через **`LuaC::engine` без Vulkan и без Lua runtime**. Пример — `examples/embed/engine_main.cpp`.
 
 Android-версия находится в `android/`. При запуске открывается **Snake**: управление свайпами и экранными стрелками, очки, ускорение и рестарт касанием. Кнопка **LUAC EDITOR** открывает редактор, проверку, просмотр сгенерированного C и Vulkan Surface. Vulkan и native library инициализируются защищённо, поэтому их отсутствие не мешает игре; Vulkan не является обязательным для установки APK. Сборка из workflow использует Android SDK 35, NDK 27 и CMake.
 
@@ -193,7 +207,7 @@ luac_free(error);
 
 ## Копирование в собственный build
 
-Lua/LuaJIT не скачиваются и не подключаются. Можно скопировать только **наши** файлы `src/luac.c`, `src/luac.h` и `src/runtime.h`:
+Lua/LuaJIT не скачиваются и не подключаются. Для compiler + всех native libraries можно скопировать только **наши** файлы `src/luac.c`, `src/luac.h`, `src/runtime.h` и `src/luac_libraries.h`. Для C++ engine отдельно достаточно `src/engine.hpp`:
 
 ```sh
 cc -std=gnu99 -DLUAC_LIBRARY_ONLY -DLUAC_RUNTIME_PATH=\"runtime.h\" \
@@ -201,7 +215,7 @@ cc -std=gnu99 -DLUAC_LIBRARY_ONLY -DLUAC_RUNTIME_PATH=\"runtime.h\" \
 cc your_program.c luac.o -o your_program
 ```
 
-Для generated C добавьте include path к каталогу с `runtime.h` и `-DLUAC_STANDALONE`, если нужен автоматический `main`.
+Для generated C добавьте include path к каталогу с `runtime.h` и `-DLUAC_STANDALONE`, если нужен автоматический `main`. На Unix добавьте `-lm`, на Windows/MinGW — `-lws2_32`; CLI делает это автоматически.
 
 ### CMake `add_subdirectory`
 
@@ -211,6 +225,7 @@ cc your_program.c luac.o -o your_program
 add_subdirectory(third_party/LuaC)
 target_link_libraries(your_target PRIVATE LuaC::luac)
 # LuaC::compiler также доступен для custom commands с --emit-c/--aot.
+# Для независимого C++17 scene engine: LuaC::engine (header-only, без Vulkan).
 ```
 
 ### Установленный CMake package
@@ -224,11 +239,12 @@ cmake --install build-cmake --prefix /your/prefix
 В другом проекте:
 
 ```cmake
-find_package(LuaC 0.3 CONFIG REQUIRED)
+find_package(LuaC 0.4 CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE LuaC::luac)
+# Опционально: target_link_libraries(your_game PRIVATE LuaC::engine)
 ```
 
-Передайте `-DCMAKE_PREFIX_PATH=/your/prefix`. Установленный CLI ищет `../share/luac/runtime.h`, library генерирует переносимый `#include "runtime.h"`; абсолютный build path в чужой проект не требуется. Дополнительно устанавливается `lib/pkgconfig/luac.pc`:
+Передайте `-DCMAKE_PREFIX_PATH=/your/prefix`. Установленный CLI ищет `../share/luac/runtime.h`, рядом устанавливается `luac_libraries.h`; library генерирует переносимый `#include "runtime.h"`. Абсолютный build path в чужой проект не требуется. Дополнительно устанавливается `lib/pkgconfig/luac.pc`:
 
 ```sh
 cc your_program.c $(pkg-config --cflags --libs luac) -o your_program
@@ -243,13 +259,16 @@ make test
 SANITIZE=1 make test  # дополнительно ASan/UBSan, если компилятор их поддерживает
 ```
 
-`tests/features.lua` и `tests/compat.lua` прогоняются через JIT и AOT. Compatibility suite покрывает bitwise/goto/metatables, raw API, patterns, bit/bit32, table/math/string, UTF-8, IO/OS и package.preload. Sanitizer job запускает generated native code под ASan/UBSan/LeakSanitizer. Отдельный headless UI-test без дисплея и GPU проверяет fixed arena Nuklear, input кнопки, multiline editing, draw commands, Vulkan vertices и scissor-батчи. CMake/CTest повторяет проверки и дополнительно собирает независимый consumer после install.
+`tests/features.lua`, `tests/compat.lua` и `tests/libraries.lua` прогоняются через JIT и AOT. Расширенный suite проверяет data/text/fs/path/vector/engine functions, SHA-256/HMAC и реальные TCP/UDP loopback exchanges без внешней сети. Sanitizer job запускает generated native code под ASan/UBSan/LeakSanitizer. Отдельные headless tests проверяют Nuklear/Vulkan geometry и C++ world/components/fixed-step simulation. CMake/CTest повторяет проверки и дополнительно собирает compiler/runtime/engine consumers после install.
 
 ## Устройство проекта
 
 - `src/luac.c` — lexer, parser, AST, генератор C, JIT-loader, C API и CLI;
 - `src/luac.h` — публичный API библиотеки;
-- `src/runtime.h` — значения, metatables, файлы, ownership runtime и стандартные библиотеки;
+- `src/runtime.h` — значения, metatables, файлы, sockets и ownership runtime;
+- `src/luac_libraries.h` — самостоятельные data/network/system/engine native modules;
+- `src/engine.hpp` — header-only C++17 world/scene library для Studio и embedding;
+- `docs/LIBRARIES.md` — справочник по 151 новому API;
 - `CMakeLists.txt`, `cmake/` — build/install/export package и AOT CTest;
 - `examples/embed/` — независимый consumer для CMake package;
 - `gui/` — Nuklear editor, command→geometry adapter, desktop Vulkan renderer и GLSL shaders;

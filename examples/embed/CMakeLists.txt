@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
-project(LuaCEmbedExample LANGUAGES C)
+project(LuaCEmbedExample LANGUAGES C CXX)
 
 # Install LuaC first, then configure with:
 # cmake -S examples/embed -B build-embed -DCMAKE_PREFIX_PATH=/your/prefix
-find_package(LuaC 0.3 CONFIG REQUIRED)
+find_package(LuaC 0.4 CONFIG REQUIRED)
 
 add_executable(luac-embed-compiler main.c)
 target_link_libraries(luac-embed-compiler PRIVATE LuaC::luac)
@@ -20,3 +20,9 @@ target_include_directories(luac-embed-native PRIVATE "${LuaC_RUNTIME_DIR}")
 if(UNIX)
     target_link_libraries(luac-embed-native PRIVATE m)
 endif()
+if(WIN32)
+    target_link_libraries(luac-embed-native PRIVATE ws2_32)
+endif()
+
+add_executable(luac-embed-engine engine_main.cpp)
+target_link_libraries(luac-embed-engine PRIVATE LuaC::engine)

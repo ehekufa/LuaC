@@ -1,5 +1,6 @@
 #include "vulkan.hpp"
 #include "nuklear_canvas.hpp"
+#include "engine.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
@@ -41,6 +42,38 @@ struct App {
     double mouseX = 0, mouseY = 0;
     bool dirty = false;
     bool controlDown = false;
+    bool engineMode = false;
+    luac::engine::World world;
+    luac::engine::World initialWorld;
+    luac::engine::EntityId selectedEntity = luac::engine::invalidEntity;
+
+    void initializeEngine() {
+        auto &player = world.create("Player", {-140, 0});
+        player.body.velocity = {55, 20};
+        player.sprite.size = {44, 44};
+        player.sprite.r = 0.20; player.sprite.g = 0.85; player.sprite.b = 0.65;
+        player.tags.insert("player");
+        player.components["health"] = 100;
+        auto &crate = world.create("Crate", {30, 25});
+        crate.body.kinematic = true;
+        crate.sprite.size = {64, 64};
+        crate.sprite.r = 0.85; crate.sprite.g = 0.55; crate.sprite.b = 0.25;
+        crate.tags.insert("obstacle");
+        auto &orb = world.create("Orb", {150, -75});
+        orb.body.velocity = {-25, 30};
+        orb.body.angularVelocity = 1.5;
+        orb.sprite.size = {30, 30};
+        orb.sprite.r = 0.55; orb.sprite.g = 0.40; orb.sprite.b = 1.0;
+        world.pause();
+        selectedEntity = player.id;
+        initialWorld = world;
+    }
+    void resetEngine() {
+        world = initialWorld;
+        selectedEntity = world.entities().empty() ? luac::engine::invalidEntity : world.entities().front().id;
+        setOutput("Engine scene reset. Fixed step: 60 Hz.");
+    }
+    luac::engine::Entity *selected() { return world.find(selectedEntity); }
 
     void setOutput(const std::string &value) {
         outputLength = static_cast<int>(std::min(value.size(), outputStorage.size() - 1));
@@ -129,7 +162,8 @@ struct App {
         ui.style.edit.text_hover = nk_rgb(225, 235, 246);
         ui.style.edit.text_active = nk_rgb(225, 235, 246);
         ui.style.window.scrollbar_size = nk_vec2(10, 10);
-        setOutput("Ready. F5 - run, F6 - syntax check, Ctrl+S - save.\nNuklear immediate UI / fixed 4 MiB arena / Vulkan renderer.");
+        setOutput("Ready. F5 - run, F6 - syntax check, F7 - Editor/Engine, Ctrl+S - save.\nNuklear immediate UI / fixed 4 MiB arena / Vulkan renderer.");
+        initializeEngine();
     }
     void load(const char *path) {
         std::ifstream file(path, std::ios::binary);
@@ -186,16 +220,34 @@ struct App {
     void toolbar() {
         if (nk_begin(&ui, "Toolbar", nk_rect(0, 0, static_cast<float>(width), 64),
                      NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_BACKGROUND)) {
-            nk_layout_row_begin(&ui, NK_STATIC, 38, 5);
-            nk_layout_row_push(&ui, 140);
+            nk_layout_row_begin(&ui, NK_STATIC, 38, 9);
+            nk_layout_row_push(&ui, 112);
             nk_label_colored(&ui, "LuaC // STUDIO", NK_TEXT_LEFT, nk_rgb(75, 220, 181));
-            nk_layout_row_push(&ui, 86);
-            if (nk_button_label(&ui, "Run  F5")) run();
-            nk_layout_row_push(&ui, 92);
-            if (nk_button_label(&ui, "Check F6")) check();
+            nk_layout_row_push(&ui, 66);
+            if (nk_button_label(&ui, "Editor")) engineMode = false;
+            nk_layout_row_push(&ui, 70);
+            if (nk_button_label(&ui, "Engine")) engineMode = true;
             nk_layout_row_push(&ui, 76);
+            if (!engineMode) { if (nk_button_label(&ui, "Run F5")) run(); }
+            else if (nk_button_label(&ui, world.running() ? "Pause" : "Play")) {
+                if (world.running()) world.pause(); else world.play();
+            }
+            nk_layout_row_push(&ui, 62);
+            if (engineMode) {
+                if (nk_button_label(&ui, "Step")) world.step();
+            } else if (nk_button_label(&ui, "Check")) check();
+            nk_layout_row_push(&ui, 62);
+            if (nk_button_label(&ui, engineMode ? "Add" : "Save")) {
+                if (engineMode) {
+                    auto &entity = world.create("Entity " + std::to_string(world.count() + 1));
+                    selectedEntity = entity.id;
+                } else save();
+            }
+            nk_layout_row_push(&ui, 62);
+            if (nk_button_label(&ui, engineMode ? "Reset" : "F6")) { if (engineMode) resetEngine(); else check(); }
+            nk_layout_row_push(&ui, 54);
             if (nk_button_label(&ui, "Save")) save();
-            nk_layout_row_push(&ui, std::max(40.0f, width - 450.0f));
+            nk_layout_row_push(&ui, std::max(40.0f, width - 620.0f));
             nk_label(&ui, filename.c_str(), NK_TEXT_RIGHT);
             nk_layout_row_end(&ui);
         }
@@ -228,12 +280,131 @@ struct App {
         }
         nk_end(&ui);
     }
+    void hierarchy(float x, float y, float w, float h) {
+        if (nk_begin(&ui, "Scene", nk_rect(x, y, w, h), NK_WINDOW_BACKGROUND)) {
+            nk_layout_row_dynamic(&ui, 22, 1);
+            nk_label_colored(&ui, "SCENE  /  entities", NK_TEXT_LEFT, nk_rgb(75, 220, 181));
+            for (auto &entity : world.entities()) {
+                nk_layout_row_dynamic(&ui, 28, 1);
+                nk_bool active = selectedEntity == entity.id;
+                std::string label = std::to_string(entity.id) + "  " + entity.name;
+                if (nk_selectable_label(&ui, label.c_str(), NK_TEXT_LEFT, &active)) selectedEntity = entity.id;
+            }
+            nk_layout_row_dynamic(&ui, 30, 2);
+            if (nk_button_label(&ui, "Add")) {
+                auto &entity = world.create("Entity " + std::to_string(world.count() + 1));
+                selectedEntity = entity.id;
+            }
+            if (nk_button_label(&ui, "Duplicate") && selected())
+                selectedEntity = world.duplicate(selectedEntity).id;
+        }
+        nk_end(&ui);
+    }
+    void viewport(float x, float y, float w, float h) {
+        if (nk_begin(&ui, "Viewport", nk_rect(x, y, w, h), NK_WINDOW_BACKGROUND | NK_WINDOW_NO_SCROLLBAR)) {
+            nk_layout_row_dynamic(&ui, 20, 1);
+            char caption[160];
+            std::snprintf(caption, sizeof(caption), "VIEWPORT  |  %zu entities  |  %.3fs  |  60 Hz fixed step",
+                          world.count(), world.time());
+            nk_label_colored(&ui, caption, NK_TEXT_LEFT, nk_rgb(75, 220, 181));
+            nk_layout_space_begin(&ui, NK_STATIC, std::max(30.0f, h - 56), 1);
+            nk_rect bounds = nk_layout_space_bounds(&ui);
+            nk_command_buffer *commands = nk_window_get_canvas(&ui);
+            nk_fill_rect(commands, bounds, 0, nk_rgb(9, 15, 25));
+            const float centerX = bounds.x + bounds.w * 0.5f;
+            const float centerY = bounds.y + bounds.h * 0.5f;
+            const float zoom = static_cast<float>(world.camera.zoom);
+            for (int gx = 0; gx < static_cast<int>(bounds.w); gx += 40)
+                nk_stroke_line(commands, bounds.x + gx, bounds.y, bounds.x + gx, bounds.y + bounds.h, 1, nk_rgb(25, 38, 54));
+            for (int gy = 0; gy < static_cast<int>(bounds.h); gy += 40)
+                nk_stroke_line(commands, bounds.x, bounds.y + gy, bounds.x + bounds.w, bounds.y + gy, 1, nk_rgb(25, 38, 54));
+            nk_stroke_line(commands, centerX, bounds.y, centerX, bounds.y + bounds.h, 1, nk_rgb(45, 71, 83));
+            nk_stroke_line(commands, bounds.x, centerY, bounds.x + bounds.w, centerY, 1, nk_rgb(45, 71, 83));
+            for (const auto &entity : world.entities()) {
+                if (!entity.active) continue;
+                auto screen = world.camera.worldToScreen(entity.transform.position);
+                float ex = centerX + static_cast<float>(screen.x) * zoom;
+                float ey = centerY + static_cast<float>(screen.y) * zoom;
+                float ew = static_cast<float>(entity.sprite.size.x * entity.transform.scale) * zoom;
+                float eh = static_cast<float>(entity.sprite.size.y * entity.transform.scale) * zoom;
+                nk_rect rectangle = nk_rect(ex - ew / 2, ey - eh / 2, ew, eh);
+                nk_color color = nk_rgbf(static_cast<float>(entity.sprite.r), static_cast<float>(entity.sprite.g),
+                                         static_cast<float>(entity.sprite.b), static_cast<float>(entity.sprite.a));
+                nk_fill_rect(commands, rectangle, 4, color);
+                if (entity.id == selectedEntity) nk_stroke_rect(commands, nk_rect(rectangle.x - 3, rectangle.y - 3,
+                    rectangle.w + 6, rectangle.h + 6), 5, 2, nk_rgb(240, 240, 210));
+                nk_draw_text(commands, nk_rect(rectangle.x, rectangle.y + rectangle.h + 4, 140, 18), entity.name.c_str(),
+                             static_cast<int>(entity.name.size()), &font, nk_rgb(0, 0, 0), nk_rgb(205, 220, 235));
+                if (nk_input_is_mouse_click_in_rect(&ui.input, NK_BUTTON_LEFT, rectangle)) selectedEntity = entity.id;
+            }
+            nk_layout_space_end(&ui);
+        }
+        nk_end(&ui);
+    }
+    void inspector(float x, float y, float w, float h) {
+        if (nk_begin(&ui, "Inspector", nk_rect(x, y, w, h), NK_WINDOW_BACKGROUND)) {
+            nk_layout_row_dynamic(&ui, 22, 1);
+            nk_label_colored(&ui, "INSPECTOR  /  native components", NK_TEXT_LEFT, nk_rgb(75, 220, 181));
+            auto *entity = selected();
+            if (!entity) {
+                nk_layout_row_dynamic(&ui, 30, 1); nk_label(&ui, "Select an entity", NK_TEXT_LEFT);
+            } else {
+                nk_layout_row_dynamic(&ui, 25, 1); nk_label(&ui, entity->name.c_str(), NK_TEXT_LEFT);
+                nk_layout_row_dynamic(&ui, 25, 2);
+                nk_property_double(&ui, "X", -10000, &entity->transform.position.x, 10000, 1, 1);
+                nk_property_double(&ui, "Y", -10000, &entity->transform.position.y, 10000, 1, 1);
+                nk_property_double(&ui, "VX", -10000, &entity->body.velocity.x, 10000, 1, 1);
+                nk_property_double(&ui, "VY", -10000, &entity->body.velocity.y, 10000, 1, 1);
+                nk_property_double(&ui, "W", 1, &entity->sprite.size.x, 4096, 1, 1);
+                nk_property_double(&ui, "H", 1, &entity->sprite.size.y, 4096, 1, 1);
+                nk_layout_row_dynamic(&ui, 25, 1);
+                nk_property_double(&ui, "Rotation", -36000, &entity->transform.rotation, 36000, 0.1, 0.1);
+                nk_property_double(&ui, "Scale", 0.01, &entity->transform.scale, 100, 0.05, 0.05);
+                nk_property_double(&ui, "Angular V", -1000, &entity->body.angularVelocity, 1000, 0.1, 0.1);
+                nk_property_double(&ui, "Red", 0, &entity->sprite.r, 1, 0.01, 0.01);
+                nk_property_double(&ui, "Green", 0, &entity->sprite.g, 1, 0.01, 0.01);
+                nk_property_double(&ui, "Blue", 0, &entity->sprite.b, 1, 0.01, 0.01);
+                nk_property_double(&ui, "Alpha", 0, &entity->sprite.a, 1, 0.01, 0.01);
+                nk_layout_row_dynamic(&ui, 26, 1);
+                nk_bool active = entity->active, kinematic = entity->body.kinematic;
+                if (nk_checkbox_label(&ui, "Active", &active)) entity->active = active;
+                if (nk_checkbox_label(&ui, "Kinematic", &kinematic)) entity->body.kinematic = kinematic;
+                for (const auto &tag : entity->tags) nk_label(&ui, ("#" + tag).c_str(), NK_TEXT_LEFT);
+                for (const auto &component : entity->components) {
+                    std::string value = component.first + " = " + std::to_string(component.second);
+                    nk_label(&ui, value.c_str(), NK_TEXT_LEFT);
+                }
+                auto hits = world.collisions(entity->id);
+                std::string collision = "Collisions: " + std::to_string(hits.size());
+                nk_label(&ui, collision.c_str(), NK_TEXT_LEFT);
+                nk_layout_row_dynamic(&ui, 30, 1);
+                if (nk_button_label(&ui, "Delete entity")) {
+                    world.destroy(selectedEntity);
+                    selectedEntity = world.entities().empty() ? luac::engine::invalidEntity : world.entities().front().id;
+                }
+            }
+        }
+        nk_end(&ui);
+    }
+    void engineWorkspace(float bodyHeight) {
+        float left = std::min(230.0f, width * 0.20f);
+        float right = std::min(280.0f, width * 0.24f);
+        float middle = std::max(120.0f, width - left - right - 28);
+        hierarchy(8, 68, left, bodyHeight);
+        inspector(left + 20 + middle, 68, right, bodyHeight);
+        float outputHeight = std::min(160.0f, bodyHeight * 0.28f);
+        viewport(left + 12, 68, middle, bodyHeight - outputHeight - 8);
+        output(left + 12, 68 + bodyHeight - outputHeight, middle, outputHeight);
+    }
     void footer() {
         if (nk_begin(&ui, "Status", nk_rect(0, static_cast<float>(height - 28),
                      static_cast<float>(width), 28), NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_BACKGROUND)) {
             nk_layout_row_dynamic(&ui, 18, 1);
             char status[160];
-            std::snprintf(status, sizeof(status), "%d bytes  |  Nuklear C99  |  Vulkan  |  F5 run  F6 check  Ctrl+S save", sourceLength);
+            if (engineMode)
+                std::snprintf(status, sizeof(status), "ENGINE  |  %zu entities  |  %s  |  F7 editor  |  Native C++17 world", world.count(), world.running() ? "playing" : "paused");
+            else
+                std::snprintf(status, sizeof(status), "%d bytes  |  Nuklear C99  |  Vulkan  |  F5 run  F6 check  F7 engine  Ctrl+S save", sourceLength);
             nk_label(&ui, status, NK_TEXT_LEFT);
         }
         nk_end(&ui);
@@ -241,9 +412,12 @@ struct App {
     void draw() {
         toolbar();
         float bodyHeight = static_cast<float>(std::max(40, height - 96));
-        float split = std::floor(width * 0.62f);
-        editor(8, 68, split - 12, bodyHeight);
-        output(split + 4, 68, width - split - 12, bodyHeight);
+        if (engineMode) engineWorkspace(bodyHeight);
+        else {
+            float split = std::floor(width * 0.62f);
+            editor(8, 68, split - 12, bodyHeight);
+            output(split + 4, 68, width - split - 12, bodyHeight);
+        }
         footer();
         canvas.render(ui, width, height);
         renderer.render(canvas.vertices, canvas.draws, width, height);
@@ -280,6 +454,10 @@ void key(GLFWwindow *window, int keyCode, int, int action, int mods) {
     if (action == GLFW_PRESS && (mods & GLFW_MOD_CONTROL) && keyCode == GLFW_KEY_S) { a->save(); return; }
     if (action == GLFW_PRESS && keyCode == GLFW_KEY_F5) { a->run(); return; }
     if (action == GLFW_PRESS && keyCode == GLFW_KEY_F6) { a->check(); return; }
+    if (action == GLFW_PRESS && keyCode == GLFW_KEY_F7) { a->engineMode = !a->engineMode; return; }
+    if (action == GLFW_PRESS && keyCode == GLFW_KEY_SPACE && a->engineMode) {
+        if (a->world.running()) a->world.pause(); else a->world.play(); return;
+    }
     nk_keys mapped = NK_KEY_NONE;
     switch (keyCode) {
     case GLFW_KEY_BACKSPACE: mapped = NK_KEY_BACKSPACE; break;
@@ -343,7 +521,11 @@ int main(int argc, char **argv) {
         application.setSource("-- LuaC Studio / Nuklear immediate UI\nlocal function greet(name)\n  return 'Hello, ' .. name\nend\n\nprint(greet('Vulkan'))\n");
         if (argc > 1) application.load(argv[1]);
         application.renderer.initialize(window, shaders ? shaders : "build");
+        double previousTime = glfwGetTime();
         while (!glfwWindowShouldClose(window)) {
+            double currentTime = glfwGetTime();
+            if (application.engineMode) application.world.advance(currentTime - previousTime);
+            previousTime = currentTime;
             nk_input_begin(&application.ui);
             glfwPollEvents();
             nk_input_end(&application.ui);

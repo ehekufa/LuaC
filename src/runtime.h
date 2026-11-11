@@ -15,8 +15,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#ifndef _WIN32
+#include <sys/stat.h>
+#include <sys/types.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#include <direct.h>
+#include <io.h>
+#define LC_INVALID_SOCKET INVALID_SOCKET
+#else
 #include <unistd.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <arpa/inet.h>
+#define LC_INVALID_SOCKET (-1)
 #endif
 
 typedef struct LcContext LcContext;
@@ -27,9 +45,10 @@ typedef struct LcFunction LcFunction;
 typedef struct LcTuple LcTuple;
 typedef struct LcCell LcCell;
 typedef struct LcFile LcFile;
+typedef struct LcSocket LcSocket;
 
 typedef enum {
-    LC_NIL = 0, LC_BOOL, LC_NUMBER, LC_STRING, LC_TABLE, LC_FUNCTION, LC_TUPLE, LC_FILE
+    LC_NIL = 0, LC_BOOL, LC_NUMBER, LC_STRING, LC_TABLE, LC_FUNCTION, LC_TUPLE, LC_FILE, LC_SOCKET
 } LcType;
 
 typedef struct LcValue {
@@ -42,6 +61,7 @@ typedef struct LcValue {
         LcFunction *function;
         LcTuple *tuple;
         LcFile *file;
+        LcSocket *socket;
     } as;
 } LcValue;
 
@@ -89,6 +109,14 @@ struct LcFile {
     int pipe;
 };
 
+struct LcSocket {
+    LcObject object;
+    intptr_t handle;
+    int closed;
+    int type;
+    int timeout_ms;
+};
+
 struct LcTuple {
     LcObject object;
     int count;
@@ -105,7 +133,9 @@ struct LcContext {
     LcValue globals;
     LcValue string_library; /* Context-owned default __index for strings. */
     LcValue file_methods;
+    LcValue socket_methods;
     LcValue input, output, error_output;
+    int socket_initialized;
     int error;
     int line;
     const char *source;
@@ -144,6 +174,7 @@ static LcObject *lc_value_object(LcValue v) {
         case LC_FUNCTION: return (LcObject *)v.as.function;
         case LC_TUPLE: return (LcObject *)v.as.tuple;
         case LC_FILE: return (LcObject *)v.as.file;
+        case LC_SOCKET: return (LcObject *)v.as.socket;
         default: return NULL;
     }
 }
@@ -155,6 +186,17 @@ static LcValue lc_retain(LcValue v) {
 }
 
 static void lc_release(LcContext *ctx, LcValue v);
+
+static void lc_socket_close_handle(LcSocket *socket) {
+    if (!socket || socket->closed) return;
+#ifdef _WIN32
+    closesocket((SOCKET)socket->handle);
+#else
+    close((int)socket->handle);
+#endif
+    socket->closed = 1;
+    socket->handle = LC_INVALID_SOCKET;
+}
 
 static void lc_unlink(LcContext *ctx, LcObject *o) {
     LcObject **p = &ctx->objects;
@@ -195,6 +237,9 @@ static void lc_free_value(LcContext *ctx, LcValue v) {
         case LC_TUPLE:
             for (i = 0; i < v.as.tuple->count; ++i)
                 lc_release(ctx, v.as.tuple->items[i]);
+            break;
+        case LC_SOCKET:
+            lc_socket_close_handle(v.as.socket);
             break;
         default: break;
     }
@@ -309,6 +354,8 @@ static int lc_value_equal(LcValue a, LcValue b) {
                 !memcmp(a.as.string->data, b.as.string->data, a.as.string->length);
         case LC_TABLE: return a.as.table == b.as.table;
         case LC_FUNCTION: return a.as.function == b.as.function;
+        case LC_FILE: return a.as.file == b.as.file;
+        case LC_SOCKET: return a.as.socket == b.as.socket;
         default: return 0;
     }
 }
@@ -396,6 +443,9 @@ static LcValue lc_table_get(LcContext *ctx, LcValue table, LcValue key) {
         }
         if (current.type == LC_FILE && ctx->file_methods.type == LC_TABLE) {
             result = lc_table_raw_get(ctx, ctx->file_methods, key); lc_release(ctx, current); return result;
+        }
+        if (current.type == LC_SOCKET && ctx->socket_methods.type == LC_TABLE) {
+            result = lc_table_raw_get(ctx, ctx->socket_methods, key); lc_release(ctx, current); return result;
         }
         if (current.type != LC_TABLE) break;
         result = lc_table_raw_get(ctx, current, key);
@@ -578,12 +628,16 @@ static LcValue lc_to_string(LcContext *ctx, LcValue v) {
             if (v.as.file->closed) return lc_string(ctx, "file (closed)");
             snprintf(buf, sizeof(buf), "file (%p)", (void *)v.as.file);
             return lc_string(ctx, buf);
+        case LC_SOCKET:
+            if (v.as.socket->closed) return lc_string(ctx, "socket (closed)");
+            snprintf(buf, sizeof(buf), "socket (%p)", (void *)v.as.socket);
+            return lc_string(ctx, buf);
         default: return lc_string(ctx, "nil");
     }
 }
 
 static const char *lc_type_name(LcValue v) {
-    static const char *names[] = {"nil", "boolean", "number", "string", "table", "function", "tuple", "userdata"};
+    static const char *names[] = {"nil", "boolean", "number", "string", "table", "function", "tuple", "userdata", "userdata"};
     v = lc_first_value(v);
     return names[(int)v.type];
 }
@@ -2199,6 +2253,8 @@ static void lc_add_native(LcContext *ctx, LcValue table, const char *name, LcNat
     lc_set_field(ctx, table, name, lc_function_new(ctx, fn, 0, NULL, name));
 }
 
+#include "luac_libraries.h"
+
 static LcContext *lc_context_new(const char *source) {
     LcContext *ctx = (LcContext *)calloc(1, sizeof(*ctx));
     LcValue math, str, tab, io, os, bit, bit32, utf8, package, loaded, preload, searchers;
@@ -2229,7 +2285,7 @@ static LcContext *lc_context_new(const char *source) {
     lc_set_global(ctx, "gcinfo", lc_function_new(ctx, lc_builtin_gcinfo, 0, NULL, "gcinfo"));
     lc_set_global(ctx, "require", lc_function_new(ctx, lc_builtin_require, 0, NULL, "require"));
     lc_set_global(ctx, "_G", lc_retain(ctx->globals));
-    lc_set_global(ctx, "_VERSION", lc_string(ctx, "LuaC 0.3 (Lua-compatible native language)"));
+    lc_set_global(ctx, "_VERSION", lc_string(ctx, "LuaC 0.4 (Lua-compatible native language)"));
     math = lc_table(ctx);
     for (i = 0; unary[i]; ++i) lc_add_native(ctx, math, unary[i], lc_math_unary);
     lc_add_native(ctx, math, "min", lc_math_minmax); lc_add_native(ctx, math, "max", lc_math_minmax);
@@ -2307,6 +2363,7 @@ static LcContext *lc_context_new(const char *source) {
     lc_set_field(ctx, package, "config", lc_string(ctx, "/\n;\n?\n!\n-\n"));
 #endif
     lc_set_global(ctx, "package", package);
+    lc_register_libraries(ctx);
     return ctx;
 }
 
@@ -2332,8 +2389,12 @@ static void lc_context_destroy(LcContext *ctx) {
             }
             file->closed = 1;
         }
+        else if (o->kind == LC_SOCKET) lc_socket_close_handle((LcSocket *)o);
         free(o); o = next;
     }
+#ifdef _WIN32
+    if (ctx->socket_initialized) WSACleanup();
+#endif
     free(ctx);
 }
 

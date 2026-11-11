@@ -28,6 +28,7 @@ jobs:
           cmake --build build-embed -j2
           ./build-embed/luac-embed-compiler
           ./build-embed/luac-embed-native
+          ./build-embed/luac-embed-engine
 
   linux:
     name: Linux CLI and libraries
@@ -39,10 +40,10 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist/linux
-          cp luac build/libluac.a build/libluac.so src/luac.h src/runtime.h README.md LICENSE dist/linux/
+          cp luac build/libluac.a build/libluac.so src/luac.h src/runtime.h src/luac_libraries.h src/engine.hpp README.md LICENSE dist/linux/
           cp -r examples dist/linux/
           tar -C dist -czf dist/LuaC-linux-x86_64.tar.gz linux
-          git archive --format=tar.gz --prefix=LuaC-0.3.0/ -o dist/LuaC-source.tar.gz HEAD
+          git archive --format=tar.gz --prefix=LuaC-0.4.0/ -o dist/LuaC-source.tar.gz HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: LuaC-linux-x86_64
@@ -84,11 +85,12 @@ jobs:
         run: |
           ./luac.exe --version
           ./luac.exe examples/demo.lua
+          ./luac.exe tests/libraries.lua
       - name: Package
         shell: msys2 {0}
         run: |
           mkdir -p dist/windows
-          cp luac.exe build/libluac.a build/libluac.dll src/luac.h src/runtime.h README.md LICENSE dist/windows/
+          cp luac.exe build/libluac.a build/libluac.dll src/luac.h src/runtime.h src/luac_libraries.h src/engine.hpp README.md LICENSE dist/windows/
           cp -r examples dist/windows/
           7z a -tzip dist/LuaC-windows-x86_64.zip ./dist/windows/*
       - uses: actions/upload-artifact@v4
@@ -107,7 +109,7 @@ jobs:
       - name: Package universal sources and native arm64 build
         run: |
           mkdir -p dist/macos
-          cp luac build/libluac.a build/libluac.dylib src/luac.h src/runtime.h README.md LICENSE dist/macos/
+          cp luac build/libluac.a build/libluac.dylib src/luac.h src/runtime.h src/luac_libraries.h src/engine.hpp README.md LICENSE dist/macos/
           cp -r examples dist/macos/
           tar -C dist -czf dist/LuaC-macos-arm64.tar.gz macos
       - uses: actions/upload-artifact@v4
@@ -127,7 +129,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist/studio-linux/build
-          cp luac build/luac-gui src/runtime.h README.md LICENSE dist/studio-linux/
+          cp luac build/luac-gui src/runtime.h src/luac_libraries.h README.md LICENSE dist/studio-linux/
           cp gui/third_party/Nuklear-LICENSE dist/studio-linux/
           cp build/*.spv dist/studio-linux/build/
           cp -r examples dist/studio-linux/
@@ -166,7 +168,7 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p dist/studio-windows/build
-          cp luac.exe build/luac-gui.exe src/runtime.h README.md LICENSE dist/studio-windows/
+          cp luac.exe build/luac-gui.exe src/runtime.h src/luac_libraries.h README.md LICENSE dist/studio-windows/
           cp gui/third_party/Nuklear-LICENSE dist/studio-windows/
           cp /ucrt64/bin/glfw3.dll dist/studio-windows/
           if [ -f /ucrt64/bin/vulkan-1.dll ]; then cp /ucrt64/bin/vulkan-1.dll dist/studio-windows/; fi

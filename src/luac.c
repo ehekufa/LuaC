@@ -20,7 +20,7 @@
 #define LUAC_RUNTIME_PATH "src/runtime.h"
 #endif
 
-#define LUAC_VERSION "0.3.0"
+#define LUAC_VERSION "0.4.0"
 #include "luac.h"
 
 typedef struct { char *data; size_t len, cap; } Str;
@@ -787,22 +787,30 @@ int main(int argc,char**argv){
      if(keep)cfile=xstrdup(keep);else{if(!mkdtemp(tmp)){fprintf(stderr,"luac: mkdtemp: %s\n",strerror(errno));goto done;}cfile=xmalloc(strlen(tmp)+8);sprintf(cfile,"%s/main.c",tmp);}
      if(!write_file(cfile,generated,strlen(generated))){fprintf(stderr,"luac: cannot write %s\n",cfile);free(cfile);goto done;}
      qcc=shell_quote(cc);qc=shell_quote(cfile);sb_init(&cmd);
-     if(mode==MODE_AOT){if(!output){fprintf(stderr,"luac: --aot requires -o OUTPUT\n");free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}qout=shell_quote(output);sb_printf(&cmd,"%s -std=gnu99 -O2 -DLUAC_STANDALONE %s -o %s -lm",qcc,qc,qout);free(qout);}
+     if(mode==MODE_AOT){if(!output){fprintf(stderr,"luac: --aot requires -o OUTPUT\n");free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}qout=shell_quote(output);sb_printf(&cmd,"%s -std=gnu99 -O2 -DLUAC_STANDALONE %s -o %s -lm",qcc,qc,qout);
+#ifdef _WIN32
+     sb_add(&cmd," -lws2_32");
+#endif
+     free(qout);}
      else{sofile=xmalloc(strlen(cfile)+5);
 #ifdef _WIN32
       sprintf(sofile,"%s.dll",cfile);
 #else
       sprintf(sofile,"%s.so",cfile);
 #endif
-      qso=shell_quote(sofile);sb_printf(&cmd,"%s -std=gnu99 -O2 -fPIC -shared %s -o %s -lm",qcc,qc,qso);free(qso);}
+      qso=shell_quote(sofile);sb_printf(&cmd,"%s -std=gnu99 -O2 -fPIC -shared %s -o %s -lm",qcc,qc,qso);
+#ifdef _WIN32
+      sb_add(&cmd," -lws2_32");
+#endif
+      free(qso);}
      if(getenv("LUAC_TRACE"))fprintf(stderr,"luac: native command: %s\n",cmd.data);
 #ifdef _WIN32
      /* Do not pass Windows paths through cmd.exe. _spawnvp quotes each argv
         element using the C runtime rules, including paths containing spaces. */
      if(mode==MODE_AOT)cr=(int)_spawnvp(_P_WAIT,cc,(const char *const[]){
-         cc,"-std=gnu99","-O2","-DLUAC_STANDALONE",cfile,"-o",output,"-lm",NULL});
+         cc,"-std=gnu99","-O2","-DLUAC_STANDALONE",cfile,"-o",output,"-lm","-lws2_32",NULL});
      else cr=(int)_spawnvp(_P_WAIT,cc,(const char *const[]){
-         cc,"-std=gnu99","-O2","-fPIC","-shared",cfile,"-o",sofile,"-lm",NULL});
+         cc,"-std=gnu99","-O2","-fPIC","-shared",cfile,"-o",sofile,"-lm","-lws2_32",NULL});
 #else
      cr=run_command(cmd.data);
 #endif

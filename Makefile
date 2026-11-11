@@ -33,13 +33,13 @@ endif
 .PHONY: all clean test install libraries gui android-check
 all: luac
 
-luac: src/luac.c src/luac.h src/runtime.h
+luac: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h
 	$(CC) -std=gnu99 $(CFLAGS) $(WARNINGS) -DLUAC_RUNTIME_PATH=\"$(RUNTIME_PATH)\" src/luac.c -o $@ $(DL_LIBS)
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/luac.o: src/luac.c src/luac.h src/runtime.h | $(BUILD)
+$(BUILD)/luac.o: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h | $(BUILD)
 	$(CC) -std=gnu99 $(CFLAGS) $(WARNINGS) -fPIC -DLUAC_LIBRARY_ONLY -DLUAC_BUILD_SHARED -DLUAC_RUNTIME_PATH=\"$(RUNTIME_PATH)\" -c src/luac.c -o $@
 
 libraries: $(BUILD)/libluac.a $(BUILD)/libluac.$(SHARED_EXT)
@@ -57,6 +57,9 @@ $(BUILD)/nuklear.o: gui/nuklear_impl.c gui/third_party/nuklear.h | $(BUILD)
 $(BUILD)/ui-test$(EXE): tests/ui_test.cpp gui/nuklear_canvas.hpp gui/geometry.hpp $(BUILD)/nuklear.o
 	$(CXX) -std=c++17 $(CXXFLAGS) $(WARNINGS) -I gui tests/ui_test.cpp $(BUILD)/nuklear.o -o $@
 
+$(BUILD)/engine-test$(EXE): tests/engine_test.cpp src/engine.hpp | $(BUILD)
+	$(CXX) -std=c++17 $(CXXFLAGS) $(WARNINGS) -I src tests/engine_test.cpp -o $@
+
 # Optional desktop Vulkan editor. Requires glfw3, vulkan and glslangValidator.
 $(BUILD)/shader.vert.spv: gui/shader.vert | $(BUILD)
 	glslangValidator -V $< -o $@
@@ -66,13 +69,15 @@ $(BUILD)/shader.frag.spv: gui/shader.frag | $(BUILD)
 gui: $(BUILD)/shader.vert.spv $(BUILD)/shader.frag.spv $(BUILD)/nuklear.o
 	$(CXX) -std=c++17 $(CXXFLAGS) $(GUI_CFLAGS) -I src -I gui gui/app.cpp gui/vulkan.cpp $(BUILD)/nuklear.o -o $(BUILD)/luac-gui$(EXE) $(GUI_LIBS)
 
-test: luac $(BUILD)/ui-test$(EXE)
+test: luac $(BUILD)/ui-test$(EXE) $(BUILD)/engine-test$(EXE)
 	./tests/run.sh
 
-install: src/luac.c src/luac.h src/runtime.h libraries
+install: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h src/engine.hpp libraries
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/share/luac
 	install -m644 src/runtime.h $(DESTDIR)$(PREFIX)/share/luac/runtime.h
+	install -m644 src/luac_libraries.h $(DESTDIR)$(PREFIX)/share/luac/luac_libraries.h
 	install -m644 src/luac.h $(DESTDIR)$(PREFIX)/include/luac.h
+	install -m644 src/engine.hpp $(DESTDIR)$(PREFIX)/include/engine.hpp
 	install -m644 $(BUILD)/libluac.a $(DESTDIR)$(PREFIX)/lib/libluac.a
 	install -m755 $(BUILD)/libluac.$(SHARED_EXT) $(DESTDIR)$(PREFIX)/lib/libluac.$(SHARED_EXT)
 	$(CC) -std=gnu99 $(CFLAGS) $(WARNINGS) -DLUAC_RUNTIME_PATH=\"$(PREFIX)/share/luac/runtime.h\" src/luac.c -o $(DESTDIR)$(PREFIX)/bin/luac $(DL_LIBS)
