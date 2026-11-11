@@ -39,6 +39,7 @@ eq(hash.hmac_sha256("key", "The quick brown fox jumps over the lazy dog"),
    "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8")
 
 -- Filesystem and path functions stay inside the test scratch directory.
+assert(fs.mkdirs("tests/.tmp"))
 local file = "tests/.tmp/library-data.txt"
 eq(fs.writefile(file, "abc"), 3)
 eq(fs.readfile(file), "abc")
