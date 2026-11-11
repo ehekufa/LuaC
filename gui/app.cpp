@@ -308,7 +308,7 @@ struct App {
                           world.count(), world.time());
             nk_label_colored(&ui, caption, NK_TEXT_LEFT, nk_rgb(75, 220, 181));
             nk_layout_space_begin(&ui, NK_STATIC, std::max(30.0f, h - 56), 1);
-            nk_rect bounds = nk_layout_space_bounds(&ui);
+            struct nk_rect bounds = nk_layout_space_bounds(&ui);
             nk_command_buffer *commands = nk_window_get_canvas(&ui);
             nk_fill_rect(commands, bounds, 0, nk_rgb(9, 15, 25));
             const float centerX = bounds.x + bounds.w * 0.5f;
@@ -323,13 +323,13 @@ struct App {
             for (const auto &entity : world.entities()) {
                 if (!entity.active) continue;
                 auto screen = world.camera.worldToScreen(entity.transform.position);
-                float ex = centerX + static_cast<float>(screen.x) * zoom;
-                float ey = centerY + static_cast<float>(screen.y) * zoom;
+                float ex = centerX + static_cast<float>(screen.x);
+                float ey = centerY + static_cast<float>(screen.y);
                 float ew = static_cast<float>(entity.sprite.size.x * entity.transform.scale) * zoom;
                 float eh = static_cast<float>(entity.sprite.size.y * entity.transform.scale) * zoom;
-                nk_rect rectangle = nk_rect(ex - ew / 2, ey - eh / 2, ew, eh);
-                nk_color color = nk_rgbf(static_cast<float>(entity.sprite.r), static_cast<float>(entity.sprite.g),
-                                         static_cast<float>(entity.sprite.b), static_cast<float>(entity.sprite.a));
+                struct nk_rect rectangle = nk_rect(ex - ew / 2, ey - eh / 2, ew, eh);
+                nk_color color = nk_rgba(static_cast<int>(entity.sprite.r * 255), static_cast<int>(entity.sprite.g * 255),
+                                         static_cast<int>(entity.sprite.b * 255), static_cast<int>(entity.sprite.a * 255));
                 nk_fill_rect(commands, rectangle, 4, color);
                 if (entity.id == selectedEntity) nk_stroke_rect(commands, nk_rect(rectangle.x - 3, rectangle.y - 3,
                     rectangle.w + 6, rectangle.h + 6), 5, 2, nk_rgb(240, 240, 210));

@@ -56,7 +56,6 @@ jobs:
   windows:
     name: Windows EXE and libraries
     runs-on: windows-latest
-    needs: test
     steps:
       - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
@@ -85,7 +84,15 @@ jobs:
         run: |
           ./luac.exe --version
           ./luac.exe examples/demo.lua
-          ./luac.exe tests/libraries.lua
+          set +e
+          ./luac.exe tests/libraries.lua > library-smoke.log 2>&1
+          status=$?
+          cat library-smoke.log
+          if [ "$status" -ne 0 ]; then
+            message=$(tail -c 1800 library-smoke.log | tr '\r\n' '  ')
+            printf '::error file=tests/libraries.lua::%s\n' "$message"
+            exit "$status"
+          fi
       - name: Package
         shell: msys2 {0}
         run: |
