@@ -26,6 +26,29 @@ cmp tests/.tmp/libraries-expected.out tests/.tmp/libraries-jit.out
 tests/.tmp/libraries-aot > tests/.tmp/libraries-aot.out
 cmp tests/.tmp/libraries-expected.out tests/.tmp/libraries-aot.out
 
+./luac tests/runtime.lua > tests/.tmp/runtime-jit.out
+printf '%s\n' 'LuaC runtime roadmap: OK' > tests/.tmp/runtime-expected.out
+cmp tests/.tmp/runtime-expected.out tests/.tmp/runtime-jit.out
+./luac --aot tests/runtime.lua -o tests/.tmp/runtime-aot >/dev/null
+tests/.tmp/runtime-aot > tests/.tmp/runtime-aot.out
+cmp tests/.tmp/runtime-expected.out tests/.tmp/runtime-aot.out
+runtime_aot="$(pwd)/tests/.tmp/runtime-aot"
+(cd / && "$runtime_aot" > "$OLDPWD/tests/.tmp/runtime-aot-detached.out")
+cmp tests/.tmp/runtime-expected.out tests/.tmp/runtime-aot-detached.out
+
+case "$(uname -s 2>/dev/null)" in
+  Darwin) ffi_ext=dylib; ffi_shared=-dynamiclib ;;
+  MINGW*|MSYS*|CYGWIN*) ffi_ext=dll; ffi_shared=-shared ;;
+  *) ffi_ext=so; ffi_shared=-shared ;;
+esac
+cc -std=c99 $ffi_shared tests/ffi_fixture.c -o "tests/.tmp/ffi-fixture.$ffi_ext"
+LUAC_FFI_FIXTURE="tests/.tmp/ffi-fixture.$ffi_ext" ./luac tests/ffi.lua > tests/.tmp/ffi-jit.out
+printf '%s\n' 'LuaC FFI: OK' > tests/.tmp/ffi-expected.out
+cmp tests/.tmp/ffi-expected.out tests/.tmp/ffi-jit.out
+./luac --aot tests/ffi.lua -o tests/.tmp/ffi-aot >/dev/null
+LUAC_FFI_FIXTURE="tests/.tmp/ffi-fixture.$ffi_ext" tests/.tmp/ffi-aot > tests/.tmp/ffi-aot.out
+cmp tests/.tmp/ffi-expected.out tests/.tmp/ffi-aot.out
+
 ./luac tests/audio.lua > tests/.tmp/audio-jit.out
 printf '%s\n' 'LuaC native audio: OK' > tests/.tmp/audio-expected.out
 cmp tests/.tmp/audio-expected.out tests/.tmp/audio-jit.out
@@ -43,6 +66,7 @@ tests/.tmp/api-test
 ./luac --emit-c tests/compat.lua -o tests/.tmp/compat.c >/dev/null
 ./luac --emit-c tests/libraries.lua -o tests/.tmp/libraries.c >/dev/null
 ./luac --emit-c tests/audio.lua -o tests/.tmp/audio.c >/dev/null
+./luac --emit-c tests/runtime.lua -o tests/.tmp/runtime.c >/dev/null
 grep -q 'lc_jit_main' tests/.tmp/demo.c
 grep -q 'LC_RELEASE' tests/.tmp/demo.c
 
@@ -68,6 +92,10 @@ if [ "${SANITIZE:-0}" = 1 ]; then
     -fno-omit-frame-pointer -DLUAC_STANDALONE \
     tests/.tmp/audio.c -o tests/.tmp/audio-sanitize -lm
   ASAN_OPTIONS=detect_leaks=1 tests/.tmp/audio-sanitize >/dev/null
+  cc -std=gnu99 -O1 -g -fsanitize=address,undefined \
+    -fno-omit-frame-pointer -DLUAC_STANDALONE \
+    tests/.tmp/runtime.c -o tests/.tmp/runtime-sanitize -lm -ldl
+  ASAN_OPTIONS=detect_leaks=1 tests/.tmp/runtime-sanitize >/dev/null
 fi
 
 echo 'JIT, AOT, C generation and diagnostics: OK'

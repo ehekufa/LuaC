@@ -67,27 +67,15 @@ HTTPS по умолчанию обязательно проверяет certific
 
 Audio buffers содержат native interleaved float32 PCM. Доступны WAV PCM 8/16/24/32-bit и float32, sine/square/saw/triangle/noise synthesis, envelopes, mixing, gain/fade/normalize, filters, delay и linear resampling. `audio.playback_available()` сообщает только о наличии compiled backend; `play()` может вернуть `nil, message`, если устройства нет. WAV/DSP остаются рабочими на headless CI.
 
-## Память без tracing GC
+## Ownership и cycle GC
 
-В runtime нет фонового или stop-the-world сборщика мусора. Компилятор автоматически создаёт cleanup-код — изменять `.lua` и вручную добавлять `free` не нужно.
+Компилятор автоматически создаёт cleanup-код — изменять `.lua` и вручную добавлять `free` не нужно. Локальные переменные и замыкания используют ownership-cells, поэтому upvalues сохраняют ссылочную семантику Lua.
 
-- Каждая локальная переменная хранится в ownership-cell.
-- Замыкания захватывают те же cells, поэтому upvalues сохраняют ссылочную семантику Lua.
-- Строки, таблицы, функции и tuples имеют счётчик владельцев и освобождаются при потере последнего владельца.
-- Все возвраты, ранние выходы и runtime-ошибки проходят через сгенерированный `lc_done`, где освобождаются locals и временные значения.
-- Контекст ведёт список аллокаций как страховку. При завершении программы он освобождает даже циклические таблицы, не обходя их дочерние ссылки.
-
-Таким образом, утечек при завершении контекста нет. Важное различие: циклы ссылок внутри **ещё работающей** программы освобождаются при завершении контекста, а не в момент их создания. Никакого периодического цикла сборки мусора при этом не запускается.
-
-Фрагмент сгенерированного кода:
-
-```c
-lc_done:
-    if (l0) { lc_cell_release(ctx, l0); l0 = NULL; }
-    LC_RELEASE(ctx, t0);
-    LC_RELEASE(ctx, t1);
-    return lc_return_value;
-```
+- Строки, таблицы, функции, tuples и native objects имеют счётчик владельцев.
+- Все возвраты, ранние выходы и runtime-ошибки проходят через сгенерированный `lc_done`.
+- Периодический collector анализирует внутренние и внешние ссылки, сохраняет живые C locals/upvalues и освобождает недостижимые циклы во время выполнения.
+- `setmetatable(t, {__mode = "k"})`, `"v"` и `"kv"` создают weak tables; мёртвые weak entries удаляются при collection.
+- `collectgarbage("collect"/"step"/"stop"/"restart"/"isrunning"/"count")` управляет collector и метриками. Фоновых threads и stop-the-world пауз отдельного GC thread нет.
 
 ## Что уже поддерживается
 
@@ -108,11 +96,11 @@ lc_done:
 - LuaJIT `bit`, Lua-compatible `bit32`, строгий UTF-8 через `utf8.char/len/codepoint/offset/codes`;
 - файлы и процессы через `io.open/read/write/lines/seek/setvbuf/popen`, стандартные потоки и детерминированное закрытие;
 - `os.date/time/difftime/getenv/remove/rename/tmpname/execute/exit/setlocale`;
-- native modules через `package.preload`, `package.loaded` и `require`;
-- **14 дополнительных native-модулей / 177 API**: `text`, `hex`, `base64`, `url`, `json`, `hash`, `fs`, `path`, `time`, `vec`, `socket`, `http`, `audio`, `engine`;
+- native modules через `package.preload`, `package.loaded` и `require`; статические `require("module")` автоматически находят соседние `.lua`/`init.lua` и связываются в JIT/AOT binary;
+- **16 дополнительных native-модулей / 188 API**: `text`, `hex`, `base64`, `url`, `json`, `hash`, `fs`, `path`, `time`, `vec`, `socket`, `http`, `audio`, `engine`, `coroutine`, `ffi`;
 - TCP/UDP/DNS, verified HTTPS через mbedTLS, PCM/WAV/synthesis/mixing/effects и optional native playback доступны и в JIT, и в AOT;
 - binary files, JSON Unicode, SHA-256/HMAC, vector math и scene simulation также работают без внешних dependencies;
-- `collectgarbage` как compatibility API для метрик/состояния, без запуска скрытого collector.
+- signed int64 и float subtypes, stackful `coroutine.create/resume/yield/wrap`, periodic cycle collection и weak tables.
 
 Полный список функций и ограничений — [`docs/LIBRARIES.md`](docs/LIBRARIES.md). Готовые примеры: [`examples/data.lua`](examples/data.lua), [`examples/network.lua`](examples/network.lua), [`examples/game.lua`](examples/game.lua). Встроенные модули одновременно доступны как globals и через `require("json")`, `require("socket")` и т.д.
 
@@ -140,16 +128,16 @@ print(next(5), next(2)) -- 15  17
 | Lua VM, bytecode VM, AST interpreter | Нет и не планируется |
 | Native JIT/AOT | Работает |
 | Metatables, bitwise, `goto` | Работают |
-| Coroutines/`yield` | Ещё не реализованы |
+| Coroutines/`yield` | Stackful native stacks: `ucontext` на Unix и Fibers на Windows; работают в JIT/AOT |
 | Runtime `load`, `loadstring`, `dofile` | Ещё не реализованы; compilation происходит через compiler API/CLI |
-| `require` | Работает для `package.preload`; динамический поиск и загрузка файлов пока не подключены |
-| LuaJIT FFI | Ещё не реализован |
+| `require` | `package.preload` и compile-time связывание literal disk imports; динамический module name требует preload |
+| FFI | Базовый `ffi.open/close/call`, typed signatures через system libffi runtime; structs/callbacks/varargs не поддержаны |
 | HTTPS/TLS | Настоящий mbedTLS, CA и hostname verification; optional build dependency |
 | Audio | Native PCM/WAV/DSP работают; playback через miniaudio включается опционально |
 | Engine | Native 2D world/simulation и Studio viewport работают; physics solver/asset pipeline не заявляются готовыми |
 | `debug` library, `string.dump`, `string.pack/unpack/packsize` | Ещё не реализованы |
-| Раздельные integer/float subtypes | Пока единый `double`; bitwise преобразует к integer по правилам runtime |
-| `math.maxinteger/mininteger` | Безопасный exactly representable диапазон ±2^53−1, не полный int64 |
+| Раздельные integer/float subtypes | Signed int64 literals/arithmetic/keys/bitwise и float subtype; integer overflow использует two’s-complement wrap |
+| `math.maxinteger/mininteger` | Полный диапазон `INT64_MAX`/`INT64_MIN` |
 | JIT tracing LuaJIT | Не копируется; LuaC компилирует функции в обычный машинный код через C compiler |
 
 То есть LuaC пока не запустит любой Lua/LuaJIT-проект без изменений. Отсутствующие возможности не маскируются заглушками. Исходники Lua/LuaJIT могут изучаться как поведенческий референс, но не копируются, не вендорятся и не линкуются.
@@ -307,7 +295,7 @@ SANITIZE=1 make test  # дополнительно ASan/UBSan, если комп
 - `src/luac_tls.h` — mbedTLS transport и certificate verification;
 - `src/luac_audio.h`, `src/third_party/miniaudio.h` — PCM/WAV/DSP и optional playback;
 - `src/engine.hpp` — header-only C++17 world/scene library для Studio и embedding;
-- `docs/LIBRARIES.md` — справочник по 177 новым API;
+- `docs/LIBRARIES.md` — справочник по 188 native APIs;
 - `CMakeLists.txt`, `cmake/` — build/install/export package и AOT CTest;
 - `examples/embed/` — независимый consumer для CMake package;
 - `gui/` — Nuklear editor, command→geometry adapter, desktop Vulkan renderer и GLSL shaders;

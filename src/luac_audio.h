@@ -69,7 +69,7 @@ static LcValue lc_audio_tone(LcContext *ctx, LcFunction *self, int argc, LcValue
     LcValue value; LcAudio *audio;
     if (argc > 2 && lc_first_value(argv[2]).type == LC_TABLE) {
         LcValue option;
-#define LC_AUDIO_OPTION_NUMBER(field, name, target) do { LcValue key = lc_string(ctx, name); option = lc_table_raw_get(ctx, lc_first_value(argv[2]), key); lc_release(ctx, key); if (option.type == LC_NUMBER) target = option.as.number; lc_release(ctx, option); } while (0)
+#define LC_AUDIO_OPTION_NUMBER(field, name, target) do { LcValue key = lc_string(ctx, name); option = lc_table_raw_get(ctx, lc_first_value(argv[2]), key); lc_release(ctx, key); if (option.type == LC_NUMBER || option.type == LC_INTEGER) target = option.type == LC_INTEGER ? (double)option.as.integer : option.as.number; lc_release(ctx, option); } while (0)
         LC_AUDIO_OPTION_NUMBER(field, "sample_rate", rate);
         LC_AUDIO_OPTION_NUMBER(field, "channels", channels);
         LC_AUDIO_OPTION_NUMBER(field, "amplitude", amplitude);

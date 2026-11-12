@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include <ctype.h>
+#include <inttypes.h>
 #if !defined(LUAC_LIBRARY_ONLY) && !defined(_WIN32)
 #include <dlfcn.h>
 #endif
@@ -57,6 +58,8 @@ typedef struct {
     TokenKind kind;
     int line, column;
     double number;
+    int64_t integer;
+    int is_integer;
     char *text;
 } Token;
 
@@ -152,7 +155,12 @@ again:
     }
     if (isdigit((unsigned char)peek(p)) || (peek(p) == '.' && isdigit((unsigned char)peek_n(p,1)))) {
         char *end;
-        p->token.number = strtod(p->source + p->pos, &end);
+        { const char *start = p->source + p->pos; char *integer_end = NULL; int floating = 0; const char *scan;
+          p->token.number = strtod(start, &end);
+          for (scan = start; scan < end; ++scan) if (*scan == '.' || *scan == 'e' || *scan == 'E' || *scan == 'p' || *scan == 'P') floating = 1;
+          errno = 0;
+          if (!floating) { p->token.integer = strtoll(start, &integer_end, 0); p->token.is_integer = integer_end == end && errno != ERANGE; }
+          else p->token.is_integer = 0; }
         if (end == p->source + p->pos || end > p->source + p->length) {
             parse_error(p, "invalid number"); return;
         }
@@ -219,7 +227,7 @@ typedef struct Expr Expr;
 typedef struct Stmt Stmt;
 struct Expr {
     ExprKind kind; int line, op, flag;
-    double number; char *name;
+    double number; int64_t integer; int is_integer; char *name;
     Expr *a,*b;
     Expr **items, **keys; int count;
     char **params; int nparams;
@@ -302,7 +310,7 @@ static Expr *parse_primary(Parser *p) {
     Expr *e;
     if (p->token.kind==T_NIL) { e=new_expr(p,E_NIL); next_token(p); }
     else if (p->token.kind==T_TRUE || p->token.kind==T_FALSE) { e=new_expr(p,E_BOOL); e->flag=p->token.kind==T_TRUE; next_token(p); }
-    else if (p->token.kind==T_NUMBER) { e=new_expr(p,E_NUMBER); e->number=p->token.number; next_token(p); }
+    else if (p->token.kind==T_NUMBER) { e=new_expr(p,E_NUMBER); e->number=p->token.number; e->integer=p->token.integer; e->is_integer=p->token.is_integer; next_token(p); }
     else if (p->token.kind==T_STRING) { e=new_expr(p,E_STRING); e->name=xstrdup(p->token.text?p->token.text:""); next_token(p); }
     else if (p->token.kind==T_DOTS) { e=new_expr(p,E_VARARG); next_token(p); }
     else if (p->token.kind==T_NAME) { e=new_expr(p,E_VAR); e->name=xstrdup(p->token.text); next_token(p); }
@@ -469,7 +477,7 @@ static char *cg_expr(Cf*f,Expr*e){
     switch(e->kind){
         case E_NIL:t=cf_new_temp(f);sb_printf(&f->body,"    %s = lc_nil();\n",t);return t;
         case E_BOOL:t=cf_new_temp(f);sb_printf(&f->body,"    %s = lc_bool(%d);\n",t,e->flag);return t;
-        case E_NUMBER:t=cf_new_temp(f);sb_printf(&f->body,"    %s = lc_number(%.17g);\n",t,e->number);return t;
+        case E_NUMBER:t=cf_new_temp(f);if(e->is_integer)sb_printf(&f->body,"    %s = lc_integer((int64_t)%" PRId64 ");\n",t,e->integer);else sb_printf(&f->body,"    %s = lc_number(%.17g);\n",t,e->number);return t;
         case E_STRING:t=cf_new_temp(f);sb_printf(&f->body,"    %s = lc_string_n(ctx, \"",t);{const unsigned char*p=(unsigned char*)e->name;for(;p&&*p;++p){if(*p=='\\'||*p=='\"')sb_printf(&f->body,"\\%c",*p);else if(*p=='\n')sb_add(&f->body,"\\n");else if(*p=='\r')sb_add(&f->body,"\\r");else if(*p=='\t')sb_add(&f->body,"\\t");else if(*p<32||*p>126)sb_printf(&f->body,"\\%03o",*p);else sb_n(&f->body,(const char*)p,1);}}sb_printf(&f->body,"\", %zu);\n",strlen(e->name));return t;
         case E_VAR:return cg_var(f,e);
         case E_VARARG:t=cf_new_temp(f);if(!f->vararg){f->cg->failed=1;fprintf(stderr,"%s:%d: cannot use '...' outside a vararg function\n",f->cg->parser->filename,e->line);sb_printf(&f->body,"    %s = lc_nil();\n",t);}else sb_printf(&f->body,"    %s = lc_retain(lc_varargs);\n",t);return t;
@@ -651,13 +659,156 @@ static const char *runtime_header_path(void) {
     return LUAC_RUNTIME_PATH;
 }
 
+typedef struct DiskModule {
+    char *name, *path, *source;
+    Parser parser;
+    Stmt *program;
+    int id;
+} DiskModule;
+typedef struct {
+    Cg *cg;
+    const char *root_file;
+    DiskModule *items;
+    int count, capacity;
+} ModuleBuild;
+static char *module_read_file(const char *path, size_t *length) {
+    FILE *file = fopen(path, "rb"); char *source; long size;
+    if (!file) return NULL;
+    if (fseek(file, 0, SEEK_END) || (size = ftell(file)) < 0 || fseek(file, 0, SEEK_SET)) { fclose(file); return NULL; }
+    source = xmalloc((size_t)size + 1);
+    if (fread(source, 1, (size_t)size, file) != (size_t)size) { free(source); fclose(file); return NULL; }
+    fclose(file); source[size] = 0; *length = (size_t)size; return source;
+}
+
+static int lc_native_module_name(const char *name) {
+    static const char *names[] = {"string","table","math","bit","bit32","utf8","io","os","package",
+        "text","hex","base64","url","json","hash","fs","path","time","vec","socket","net","http","audio","engine","coroutine","ffi","websocket",NULL};
+    int i; for (i = 0; names[i]; ++i) if (!strcmp(name, names[i])) return 1; return 0;
+}
+static char *module_candidate(const char *requiring_file, const char *name, const char *suffix) {
+    char directory[PATH_MAX], mapped[PATH_MAX], *slash;
+    size_t i;
+    snprintf(directory, sizeof(directory), "%s", requiring_file ? requiring_file : "input.lua");
+    slash = strrchr(directory, '/');
+#ifdef _WIN32
+    { char *backslash = strrchr(directory, '\\'); if (backslash && (!slash || backslash > slash)) slash = backslash; }
+#endif
+    if (slash) *slash = 0; else snprintf(directory, sizeof(directory), ".");
+    snprintf(mapped, sizeof(mapped), "%s", name);
+    for (i = 0; mapped[i]; ++i) if (mapped[i] == '.') mapped[i] = '/';
+    { char *path = xmalloc(strlen(directory) + strlen(mapped) + strlen(suffix) + 3);
+      sprintf(path, "%s/%s%s", directory, mapped, suffix); return path; }
+}
+static char *find_module_file(const char *requiring_file, const char *name) {
+    char *path = module_candidate(requiring_file, name, ".lua");
+    if (access(path, R_OK) == 0) return path;
+    free(path); path = module_candidate(requiring_file, name, "/init.lua");
+    if (access(path, R_OK) == 0) return path;
+    free(path);
+    /* The current working directory is the fallback for an `input.lua` C API
+       consumer whose logical filename has no physical directory. */
+    { char mapped[PATH_MAX]; size_t i; snprintf(mapped, sizeof(mapped), "%s", name);
+      for (i = 0; mapped[i]; ++i) if (mapped[i] == '.') mapped[i] = '/';
+      path = xmalloc(strlen(mapped) + 5); sprintf(path, "%s.lua", mapped);
+      if (access(path, R_OK) == 0) return path;
+    free(path);
+      path = xmalloc(strlen(mapped) + 10); sprintf(path, "%s/init.lua", mapped);
+      if (access(path, R_OK) == 0) return path;
+    free(path); }
+    return NULL;
+}
+static void discover_module_requires(ModuleBuild *build, Stmt *program, const char *filename);
+
+static void discover_expr_requires(ModuleBuild *build, Expr *e, const char *filename) {
+    int i;
+    if (!e || build->cg->failed) return;
+    if (e->kind == E_CALL && e->a && e->a->kind == E_VAR && e->a->name && !strcmp(e->a->name, "require") &&
+        e->count == 1 && e->items[0]->kind == E_STRING && !lc_native_module_name(e->items[0]->name)) {
+        const char *name = e->items[0]->name;
+        int index = -1, j;
+        DiskModule *module;
+        for (j = 0; j < build->count; ++j) if (!strcmp(build->items[j].name, name)) { index = j; break; }
+        if (index < 0) {
+            char *path = find_module_file(build->root_file, name);
+            if (!path && filename && build->root_file && strcmp(filename, build->root_file)) path = find_module_file(filename, name);
+            if (path) {
+                size_t source_length = 0;
+                if (build->count == build->capacity) {
+                    build->capacity = build->capacity ? build->capacity * 2 : 8;
+                    build->items = xrealloc(build->items, sizeof(DiskModule) * (size_t)build->capacity);
+                }
+                index = build->count++; module = &build->items[index]; memset(module, 0, sizeof(*module));
+                module->name = xstrdup(name); module->path = path; module->id = build->count;
+                module->source = module_read_file(path, &source_length);
+                if (!module->source) { build->cg->failed = 1; return; }
+                memset(&module->parser, 0, sizeof(module->parser));
+                module->parser.source = module->source; module->parser.filename = module->path;
+                module->parser.length = source_length; module->parser.line = module->parser.column = 1;
+                next_token(&module->parser); module->program = parse_block(&module->parser);
+                if (module->parser.token.kind != T_EOF) parse_error(&module->parser, "unexpected token in module");
+                if (module->parser.failed) {
+                    fprintf(stderr, "%s\n", module->parser.error); build->cg->failed = 1; return;
+                }
+                discover_module_requires(build, module->program, module->path);
+            }
+        }
+    }
+    discover_expr_requires(build, e->a, filename); discover_expr_requires(build, e->b, filename);
+    for (i = 0; i < e->count; ++i) {
+        discover_expr_requires(build, e->items[i], filename);
+        if (e->keys) discover_expr_requires(build, e->keys[i], filename);
+    }
+    discover_module_requires(build, e->body, filename);
+}
+static void discover_module_requires(ModuleBuild *build, Stmt *program, const char *filename) {
+    Stmt *stmt; int i;
+    for (stmt = program; stmt && !build->cg->failed; stmt = stmt->next) {
+        discover_expr_requires(build, stmt->expr, filename);
+        discover_expr_requires(build, stmt->expr2, filename);
+        discover_expr_requires(build, stmt->expr3, filename);
+        for (i = 0; i < stmt->nexprs; ++i) discover_expr_requires(build, stmt->exprs[i], filename);
+        for (i = 0; i < stmt->nblocks; ++i) {
+            discover_expr_requires(build, stmt->conds[i], filename);
+            discover_module_requires(build, stmt->blocks[i], filename);
+        }
+        discover_module_requires(build, stmt->body, filename);
+    }
+}
+static void generate_disk_module(Cg *cg, DiskModule *module) {
+    Cf root; cg->parser = &module->parser; memset(&root, 0, sizeof(root)); root.cg = cg;
+    sb_init(&root.decl); sb_init(&root.body); sb_init(&root.cleanup); cg_stmts(&root, module->program);
+    sb_printf(&cg->functions, "static LcValue lc_disk_module_%d(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {\n", module->id);
+    sb_add(&cg->functions, root.decl.data ? root.decl.data : "");
+    sb_add(&cg->functions, "    LcValue lc_return_value = {0};\n    (void)self; (void)argc; (void)argv;\n");
+    sb_add(&cg->functions, root.body.data ? root.body.data : "");
+    sb_add(&cg->functions, "lc_done:\n"); sb_add(&cg->functions, root.cleanup.data ? root.cleanup.data : "");
+    sb_add(&cg->functions, "    return lc_return_value;\n}\n\n"); cf_dispose(&root);
+}
+static void dispose_disk_modules(ModuleBuild *build) {
+    int i;
+    for (i = 0; i < build->count; ++i) {
+        DiskModule *m = &build->items[i];
+        token_clear(&m->parser.token); free_stmt(m->program); free(m->source); free(m->path); free(m->name);
+    }
+    free(build->items);
+}
+
 static char *generate_c(Parser*p,Stmt*program,const char*source){
-    Cg cg;Cf root;Expr mainexpr;char*entry;Str out;memset(&cg,0,sizeof(cg));cg.parser=p;sb_init(&cg.functions);memset(&root,0,sizeof(root));root.cg=&cg;sb_init(&root.decl);sb_init(&root.body);sb_init(&root.cleanup);memset(&mainexpr,0,sizeof(mainexpr));mainexpr.kind=E_FUNCTION;mainexpr.body=program;mainexpr.line=1;
+    Cg cg;Cf root;Expr mainexpr;char*entry;Str out;ModuleBuild modules;int i;
+    memset(&cg,0,sizeof(cg));cg.parser=p;sb_init(&cg.functions);memset(&modules,0,sizeof(modules));modules.cg=&cg;modules.root_file=source;
+    discover_module_requires(&modules,program,source);
+    for(i=0;i<modules.count&&!cg.failed;++i)generate_disk_module(&cg,&modules.items[i]);
+    cg.parser=p;
+    memset(&root,0,sizeof(root));root.cg=&cg;sb_init(&root.decl);sb_init(&root.body);sb_init(&root.cleanup);memset(&mainexpr,0,sizeof(mainexpr));mainexpr.kind=E_FUNCTION;mainexpr.body=program;mainexpr.line=1;
     /* Root has no parent and acts as the main native function. */
-    {int i;Cf*f=&root;f->vararg=0;(void)i;cg_stmts(f,program);sb_init(&out);sb_add(&out,"/* Generated by LuaC. Ownership cleanup is emitted automatically. */\n#include \"");
+    {Cf*f=&root;f->vararg=0;cg_stmts(f,program);sb_init(&out);sb_add(&out,"/* Generated by LuaC. Ownership cleanup is emitted automatically. */\n#include \"");
     sb_add(&out,runtime_header_path());
-    sb_add(&out,"\"\n\n#ifndef LC_RELEASE\n#define LC_RELEASE(ctx, v) do { lc_release((ctx), (v)); (v) = lc_nil(); } while (0)\n#endif\n\n");sb_add(&out,cg.functions.data?cg.functions.data:"");sb_add(&out,"static LcValue lc_user_main(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {\n");sb_add(&out,f->decl.data?f->decl.data:"");sb_add(&out,"    LcValue lc_return_value = {0};\n    (void)self; (void)argc; (void)argv;\n");sb_add(&out,f->body.data?f->body.data:"");sb_add(&out,"lc_done:\n");sb_add(&out,f->cleanup.data?f->cleanup.data:"");sb_add(&out,"    return lc_return_value;\n}\n\n");sb_printf(&out,"int lc_program_main(LcContext *ctx) {\n    LcValue r = lc_user_main(ctx, NULL, 0, NULL);\n    lc_release(ctx, r);\n    return lc_report_error(ctx);\n}\n\n#if defined(_WIN32)\n__declspec(dllexport)\n#else\n__attribute__((visibility(\"default\")))\n#endif\nint lc_jit_main(void) {\n    LcContext *ctx = lc_context_new(\"%s\");\n    int status;\n    if (!ctx) return 1;\n    status = lc_program_main(ctx);\n    lc_context_destroy(ctx);\n    return status;\n}\n\n#ifdef LUAC_STANDALONE\nint main(void) { return lc_jit_main(); }\n#endif\n",source);}
-    entry=out.data;cf_dispose(&root);sb_free(&cg.functions);(void)entry;
+    sb_add(&out,"\"\n\n#ifndef LC_RELEASE\n#define LC_RELEASE(ctx, v) do { lc_release((ctx), (v)); (v) = lc_nil(); } while (0)\n#endif\n\n");sb_add(&out,cg.functions.data?cg.functions.data:"");sb_add(&out,"static LcValue lc_user_main(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {\n");sb_add(&out,f->decl.data?f->decl.data:"");sb_add(&out,"    LcValue lc_return_value = {0};\n    (void)self; (void)argc; (void)argv;\n");sb_add(&out,f->body.data?f->body.data:"");sb_add(&out,"lc_done:\n");sb_add(&out,f->cleanup.data?f->cleanup.data:"");sb_add(&out,"    return lc_return_value;\n}\n\n");
+    sb_add(&out,"int lc_program_main(LcContext *ctx) {\n    LcValue r;\n");
+    for(i=0;i<modules.count;++i){int j;sb_printf(&out,"    lc_preload_native(ctx, \"");
+        for(j=0;modules.items[i].name[j];++j){char c=modules.items[i].name[j];if(c=='\\'||c=='\"')sb_printf(&out,"\\%c",c);else sb_n(&out,&c,1);}sb_printf(&out,"\", lc_disk_module_%d);\n",modules.items[i].id);}
+    sb_add(&out,"    r = lc_user_main(ctx, NULL, 0, NULL);\n    lc_release(ctx, r);\n    return lc_report_error(ctx);\n}\n\n#if defined(_WIN32)\n__declspec(dllexport)\n#else\n__attribute__((visibility(\"default\")))\n#endif\nint lc_jit_main(void) {\n    LcContext *ctx = lc_context_new(\"");sb_add(&out,source);sb_add(&out,"\");\n    int status;\n    if (!ctx) return 1;\n    status = lc_program_main(ctx);\n    lc_context_destroy(ctx);\n    return status;\n}\n\n#ifdef LUAC_STANDALONE\nint main(void) { return lc_jit_main(); }\n#endif\n");}
+    entry=out.data;cf_dispose(&root);sb_free(&cg.functions);dispose_disk_modules(&modules);(void)entry;
     if(cg.failed){sb_free(&out);return NULL;}
     return out.data;
 }
@@ -772,7 +923,7 @@ static int run_command(const char*cmd){int r=system(cmd);if(r==-1)return -1;retu
 #ifndef LUAC_DEFAULT_LDFLAGS
 #define LUAC_DEFAULT_LDFLAGS ""
 #endif
-static void usage(void){puts("LuaC "LUAC_VERSION" — Lua-syntax native compiler without a tracing GC\n\nUsage:\n  luac file.lua              JIT compile and run\n  luac --check file.lua      Parse and validate\n  luac --emit-c file.lua [-o out.c]\n  luac --aot file.lua -o program\n\nOptions: --cc COMPILER  --cflags FLAGS  --ldflags FLAGS  --keep-c PATH  --version\nEnvironment: CC, LUAC_CFLAGS and LUAC_LDFLAGS append native compiler flags.");}
+static void usage(void){puts("LuaC "LUAC_VERSION" — Lua-syntax native compiler with stackful coroutines and cycle GC\n\nUsage:\n  luac file.lua              JIT compile and run\n  luac --check file.lua      Parse and validate\n  luac --emit-c file.lua [-o out.c]\n  luac --aot file.lua -o program\n\nOptions: --cc COMPILER  --cflags FLAGS  --ldflags FLAGS  --keep-c PATH  --version\nEnvironment: CC, LUAC_CFLAGS and LUAC_LDFLAGS append native compiler flags.");}
 
 int main(int argc,char**argv){
     const char*input=NULL,*output=NULL,*keep=NULL,*cc=getenv("CC");Str extra_cflags,extra_ldflags;sb_init(&extra_cflags);sb_init(&extra_ldflags);sb_add(&extra_cflags,LUAC_DEFAULT_CFLAGS);sb_add(&extra_ldflags,LUAC_DEFAULT_LDFLAGS);{const char*flags=getenv("LUAC_CFLAGS");if(flags){sb_add(&extra_cflags," ");sb_add(&extra_cflags,flags);}flags=getenv("LUAC_LDFLAGS");if(flags){sb_add(&extra_ldflags," ");sb_add(&extra_ldflags,flags);}}enum{MODE_JIT,MODE_CHECK,MODE_C,MODE_AOT}mode=MODE_JIT;int i,status=1;size_t length;char*source,*generated;Parser p;Stmt*program;

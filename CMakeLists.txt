@@ -50,7 +50,7 @@ if(LUAC_WITH_MINIAUDIO)
     target_compile_definitions(luac_runtime INTERFACE LUAC_WITH_MINIAUDIO)
     target_link_libraries(luac_runtime INTERFACE Threads::Threads ${CMAKE_DL_LIBS})
     if(UNIX)
-        target_link_libraries(luac_runtime INTERFACE m)
+        target_link_libraries(luac_runtime INTERFACE m ${CMAKE_DL_LIBS})
     endif()
     string(APPEND LUAC_NATIVE_CFLAGS " -DLUAC_WITH_MINIAUDIO")
     string(APPEND LUAC_NATIVE_LDFLAGS " -pthread")
@@ -64,7 +64,10 @@ if(WIN32)
         string(APPEND LUAC_NATIVE_LDFLAGS " -lcrypt32")
     endif()
 elseif(UNIX)
-    target_link_libraries(luac_runtime INTERFACE m)
+    target_link_libraries(luac_runtime INTERFACE m ${CMAKE_DL_LIBS})
+    if(CMAKE_DL_LIBS)
+        string(APPEND LUAC_NATIVE_LDFLAGS " -l${CMAKE_DL_LIBS}")
+    endif()
 endif()
 
 add_library(luac_library src/luac.c)
@@ -161,6 +164,29 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
             PASS_REGULAR_EXPRESSION "LuaC extended libraries: OK"
         )
+        add_test(NAME luac-runtime-jit COMMAND luac_compiler
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime.lua")
+        set_tests_properties(luac-runtime-jit PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            PASS_REGULAR_EXPRESSION "LuaC runtime roadmap: OK"
+        )
+        add_test(NAME luac-runtime-aot
+            COMMAND ${CMAKE_COMMAND}
+                -DLUAC=$<TARGET_FILE:luac_compiler>
+                -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime.lua
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/luac-runtime-aot
+                -DWORKDIR=${CMAKE_CURRENT_SOURCE_DIR}
+                -DEXPECTED=LuaC.runtime.roadmap:.OK
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunAotTest.cmake
+        )
+        add_library(luac-ffi-fixture SHARED tests/ffi_fixture.c)
+        add_test(NAME luac-ffi-jit COMMAND luac_compiler
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/ffi.lua")
+        set_tests_properties(luac-ffi-jit PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            ENVIRONMENT "LUAC_FFI_FIXTURE=$<TARGET_FILE:luac-ffi-fixture>"
+            PASS_REGULAR_EXPRESSION "LuaC FFI: OK"
+        )
         add_test(NAME luac-audio-jit COMMAND luac_compiler
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/audio.lua")
         set_tests_properties(luac-audio-jit PROPERTIES
@@ -235,9 +261,9 @@ install(EXPORT LuaCTargets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LuaC
 )
 install(FILES src/luac.h src/engine.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES src/runtime.h src/luac_libraries.h src/luac_tls.h src/luac_audio.h
+install(FILES src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_tls.h src/luac_audio.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES src/runtime.h src/luac_libraries.h src/luac_tls.h src/luac_audio.h
+install(FILES src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_tls.h src/luac_audio.h
     DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)
 install(DIRECTORY src/third_party DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY src/third_party DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)

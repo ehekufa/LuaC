@@ -10,7 +10,30 @@ local sameJson = require("json") -- встроенный module, уже нахо
 assert(sameJson == json)
 ```
 
-14 модулей содержат **177 callable API** (без подсчёта alias `net`). Существующие `string`, `table`, `math`, `bit`, `bit32`, `utf8`, `io` и `os` также остаются доступны.
+16 модулей содержат **188 callable API** (без подсчёта alias `net`). Существующие `string`, `table`, `math`, `bit`, `bit32`, `utf8`, `io` и `os` также остаются доступны.
+
+## Modules, integers, coroutines and memory
+
+Literal `require("player.stats")` ищет `player/stats.lua` и `player/stats/init.lua` относительно исходного entry file, затем в текущей директории компиляции. Найденные modules рекурсивно компилируются в тот же executable; после AOT сборки исходные `.lua` файлы при запуске не нужны. `package.preload` сохраняется для built-ins и вычисляемых/dynamic imports.
+
+Integer literals и integer arithmetic сохраняют signed 64-bit значения, включая точные table keys и bitwise operations. `math.type`, `math.tointeger`, `math.maxinteger` и `math.mininteger` различают integer/float. Деление `/` возвращает float; `//` и `%` используют floor semantics.
+
+`coroutine`: `create`, `resume`, `yield`, `wrap`, `status`, `running`, `isyieldable`. Реализация stackful: `yield` работает во вложенных функциях и сохраняет locals. Unix использует `ucontext`, Windows — native Fibers. Ошибка внутри coroutine возвращается из `resume` как `false, message`; `wrap` повторно выбрасывает её.
+
+`collectgarbage("collect")` освобождает недостижимые reference cycles во время работы программы. `__mode="k"`, `"v"` и `"kv"` включают weak keys/values. Также доступны `step`, `stop`, `restart`, `isrunning`, `count`.
+
+## Basic native FFI
+
+```lua
+local m = assert(ffi.open("libm.so.6"))
+local value = ffi.call(m, "cos", "double(double)", 0)
+assert(value == 1)
+ffi.close(m)
+```
+
+`ffi.open`/`ffi.load` загружает обычную `.dll`, `.so` или `.dylib`; `ffi.call(library, symbol, signature, ...)` вызывает exported C function. Поддержаны `void`, `bool`, signed/unsigned 8/16/32/64-bit integers, `int`, `uint`, `size_t`, `ptrdiff_t`, `float`, `double`, `pointer`/`ptr` и `string`, до 16 аргументов. String arguments передаются как temporary NUL-terminated `const char *`; pointers представлены int64 addresses.
+
+Для вызовов используется системный **libffi runtime**, обнаруживаемый через dynamic loader; headers и link-time `-lffi` не нужны. На Linux обычно требуется пакет `libffi8`. Если runtime отсутствует, вызов завершается понятной ошибкой. Struct-by-value, callbacks в Lua, C varargs и platform-specific ABI attributes пока не поддерживаются. Как и в LuaJIT FFI, неверная signature или pointer может повредить процесс — это низкоуровневый unsafe API.
 
 ## Data and text
 

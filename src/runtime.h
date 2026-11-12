@@ -1,11 +1,15 @@
 #ifndef LUAC_RUNTIME_H
 #define LUAC_RUNTIME_H
 
-/* LuaC runtime: deterministic ownership, no tracing garbage collector. */
+/* LuaC runtime: refcount roots, cycle collection, weak tables and native values. */
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include <ctype.h>
+#include <inttypes.h>
+#ifndef _WIN32
+#include <ucontext.h>
+#endif
 #include <errno.h>
 #include <math.h>
 #include <locale.h>
@@ -28,6 +32,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <dlfcn.h>
 #include <netdb.h>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -47,9 +52,11 @@ typedef struct LcCell LcCell;
 typedef struct LcFile LcFile;
 typedef struct LcSocket LcSocket;
 typedef struct LcAudio LcAudio;
+typedef struct LcCoroutine LcCoroutine;
+typedef struct LcFFILibrary LcFFILibrary;
 
 typedef enum {
-    LC_NIL = 0, LC_BOOL, LC_NUMBER, LC_STRING, LC_TABLE, LC_FUNCTION, LC_TUPLE, LC_FILE, LC_SOCKET, LC_AUDIO
+    LC_NIL = 0, LC_BOOL, LC_NUMBER, LC_INTEGER, LC_STRING, LC_TABLE, LC_FUNCTION, LC_TUPLE, LC_FILE, LC_SOCKET, LC_AUDIO, LC_COROUTINE, LC_FFI
 } LcType;
 
 typedef struct LcValue {
@@ -57,6 +64,7 @@ typedef struct LcValue {
     union {
         int boolean;
         double number;
+        int64_t integer;
         LcString *string;
         LcTable *table;
         LcFunction *function;
@@ -64,6 +72,8 @@ typedef struct LcValue {
         LcFile *file;
         LcSocket *socket;
         LcAudio *audio;
+        LcCoroutine *coroutine;
+        LcFFILibrary *ffi;
     } as;
 } LcValue;
 
@@ -71,8 +81,23 @@ typedef LcValue (*LcNative)(LcContext *, LcFunction *, int, LcValue *);
 
 struct LcObject {
     size_t refs;
+    size_t gc_incoming;
+    unsigned gc_mark;
     int kind;
     LcObject *next;
+};
+
+struct LcCoroutine {
+    LcObject object;
+    LcValue function, resume_args, yielded, result;
+    void *stack;
+    size_t stack_size;
+    int state, started;
+#ifndef _WIN32
+    ucontext_t context, caller;
+#else
+    void *fiber, *caller_fiber;
+#endif
 };
 
 struct LcString {
@@ -142,6 +167,10 @@ struct LcCell {
 
 struct LcContext {
     LcObject *objects;
+    LcCoroutine *active_coroutine;
+    int gc_collecting;
+    int gc_enabled;
+    unsigned allocations_since_gc;
     LcValue globals;
     LcValue string_library; /* Context-owned default __index for strings. */
     LcValue file_methods;
@@ -160,6 +189,8 @@ struct LcContext {
 static LcValue lc_nil(void) { LcValue v; memset(&v, 0, sizeof(v)); return v; }
 static LcValue lc_bool(int b) { LcValue v = lc_nil(); v.type = LC_BOOL; v.as.boolean = !!b; return v; }
 static LcValue lc_number(double n) { LcValue v = lc_nil(); v.type = LC_NUMBER; v.as.number = n; return v; }
+static LcValue lc_integer(int64_t n) { LcValue v = lc_nil(); v.type = LC_INTEGER; v.as.integer = n; return v; }
+static int lc_is_numeric(LcValue v) { return v.type == LC_NUMBER || v.type == LC_INTEGER || v.type == LC_STRING; }
 static int lc_truthy(LcValue v) { return v.type != LC_NIL && !(v.type == LC_BOOL && !v.as.boolean); }
 static int lc_is_multi(LcValue v) { return v.type == LC_TUPLE; }
 
@@ -172,6 +203,8 @@ static void lc_error(LcContext *ctx, const char *fmt, ...) {
     va_end(ap);
 }
 
+static void lc_gc_collect(LcContext *ctx);
+static void lc_ffi_dispose(LcFFILibrary *library);
 static void *lc_alloc(LcContext *ctx, size_t size, int kind) {
     LcObject *o = (LcObject *)calloc(1, size);
     if (!o) { lc_error(ctx, "out of memory"); return NULL; }
@@ -179,6 +212,10 @@ static void *lc_alloc(LcContext *ctx, size_t size, int kind) {
     o->kind = kind;
     o->next = ctx->objects;
     ctx->objects = o;
+    if (ctx->gc_enabled && !ctx->gc_collecting && ++ctx->allocations_since_gc >= 512) {
+        ctx->allocations_since_gc = 0;
+        lc_gc_collect(ctx);
+    }
     return o;
 }
 
@@ -191,6 +228,8 @@ static LcObject *lc_value_object(LcValue v) {
         case LC_FILE: return (LcObject *)v.as.file;
         case LC_SOCKET: return (LcObject *)v.as.socket;
         case LC_AUDIO: return (LcObject *)v.as.audio;
+        case LC_COROUTINE: return (LcObject *)v.as.coroutine;
+        case LC_FFI: return (LcObject *)v.as.ffi;
         default: return NULL;
     }
 }
@@ -255,6 +294,20 @@ static void lc_free_value(LcContext *ctx, LcValue v) {
             for (i = 0; i < v.as.tuple->count; ++i)
                 lc_release(ctx, v.as.tuple->items[i]);
             break;
+        case LC_FFI:
+            lc_ffi_dispose(v.as.ffi);
+            break;
+        case LC_COROUTINE:
+            lc_release(ctx, v.as.coroutine->function);
+            lc_release(ctx, v.as.coroutine->resume_args);
+            lc_release(ctx, v.as.coroutine->yielded);
+            lc_release(ctx, v.as.coroutine->result);
+#ifdef _WIN32
+            if (v.as.coroutine->fiber) DeleteFiber(v.as.coroutine->fiber);
+#else
+            free(v.as.coroutine->stack);
+#endif
+            break;
         case LC_SOCKET:
             lc_socket_close_handle(v.as.socket);
             break;
@@ -269,7 +322,7 @@ static void lc_free_value(LcContext *ctx, LcValue v) {
 
 static void lc_release(LcContext *ctx, LcValue v) {
     LcObject *o = lc_value_object(v);
-    if (o && --o->refs == 0) lc_free_value(ctx, v);
+    if (o && --o->refs == 0 && !ctx->gc_collecting) lc_free_value(ctx, v);
 }
 
 static LcValue lc_string_n(LcContext *ctx, const char *s, size_t n) {
@@ -365,11 +418,21 @@ static LcValue lc_nth(LcValue v, int index) {
 
 static int lc_value_equal(LcValue a, LcValue b) {
     a = lc_first_value(a); b = lc_first_value(b);
-    if (a.type != b.type) return 0;
+    if (a.type != b.type) {
+        if ((a.type == LC_NUMBER || a.type == LC_INTEGER) && (b.type == LC_NUMBER || b.type == LC_INTEGER)) {
+            if (a.type == LC_INTEGER && b.type == LC_INTEGER) return a.as.integer == b.as.integer;
+            if (a.type == LC_NUMBER && b.type == LC_NUMBER) return a.as.number == b.as.number;
+            { LcValue iv = a.type == LC_INTEGER ? a : b, dv = a.type == LC_NUMBER ? a : b;
+              if (!isfinite(dv.as.number) || floor(dv.as.number) != dv.as.number || dv.as.number < -9223372036854775808.0 || dv.as.number >= 9223372036854775808.0) return 0;
+              return iv.as.integer == (int64_t)dv.as.number; }
+        }
+        return 0;
+    }
     switch (a.type) {
         case LC_NIL: return 1;
         case LC_BOOL: return a.as.boolean == b.as.boolean;
         case LC_NUMBER: return a.as.number == b.as.number;
+        case LC_INTEGER: return a.as.integer == b.as.integer;
         case LC_STRING:
             return a.as.string->length == b.as.string->length &&
                 !memcmp(a.as.string->data, b.as.string->data, a.as.string->length);
@@ -378,6 +441,8 @@ static int lc_value_equal(LcValue a, LcValue b) {
         case LC_FILE: return a.as.file == b.as.file;
         case LC_SOCKET: return a.as.socket == b.as.socket;
         case LC_AUDIO: return a.as.audio == b.as.audio;
+        case LC_COROUTINE: return a.as.coroutine == b.as.coroutine;
+        case LC_FFI: return a.as.ffi == b.as.ffi;
         default: return 0;
     }
 }
@@ -412,6 +477,7 @@ static void lc_table_raw_set(LcContext *ctx, LcValue table, LcValue key, LcValue
     if (table.type != LC_TABLE) { lc_error(ctx, "attempt to index a %s value", table.type == LC_NIL ? "nil" : "non-table"); return; }
     if (key.type == LC_NIL) { lc_error(ctx, "table index is nil"); return; }
     if (key.type == LC_NUMBER && isnan(key.as.number)) { lc_error(ctx, "table index is NaN"); return; }
+    if (key.type == LC_NUMBER && isfinite(key.as.number) && floor(key.as.number) == key.as.number && key.as.number >= -9223372036854775808.0 && key.as.number < 9223372036854775808.0) key = lc_integer((int64_t)key.as.number);
     t = table.as.table;
     at = lc_table_find(t, key);
     if (value.type == LC_NIL) {
@@ -611,6 +677,7 @@ static double lc_to_number(LcContext *ctx, LcValue v, int *ok) {
     v = lc_first_value(v);
     *ok = 1;
     if (v.type == LC_NUMBER) return v.as.number;
+    if (v.type == LC_INTEGER) return (double)v.as.integer;
     if (v.type == LC_STRING) {
         double n;
         errno = 0;
@@ -625,8 +692,11 @@ static double lc_to_number(LcContext *ctx, LcValue v, int *ok) {
 
 static int64_t lc_to_integer(LcContext *ctx, LcValue value) {
     int ok = 0;
-    double number = lc_to_number(ctx, value, &ok);
-    if (!ok || !isfinite(number) || number < -9223372036854775807.0 || number >= 9223372036854775807.0) {
+    double number;
+    value = lc_first_value(value);
+    if (value.type == LC_INTEGER) return value.as.integer;
+    number = lc_to_number(ctx, value, &ok);
+    if (!ok || !isfinite(number) || floor(number) != number || number < -9223372036854775808.0 || number >= 9223372036854775808.0) {
         lc_error(ctx, "number has no integer representation");
         return 0;
     }
@@ -641,6 +711,9 @@ static LcValue lc_to_string(LcContext *ctx, LcValue v) {
         case LC_BOOL: return lc_string(ctx, v.as.boolean ? "true" : "false");
         case LC_NUMBER:
             snprintf(buf, sizeof(buf), "%.14g", v.as.number);
+            return lc_string(ctx, buf);
+        case LC_INTEGER:
+            snprintf(buf, sizeof(buf), "%" PRId64, v.as.integer);
             return lc_string(ctx, buf);
         case LC_STRING: return lc_retain(v);
         case LC_TABLE:
@@ -660,12 +733,18 @@ static LcValue lc_to_string(LcContext *ctx, LcValue v) {
             if (v.as.socket->closed) return lc_string(ctx, "socket (closed)");
             snprintf(buf, sizeof(buf), "socket (%p)", (void *)v.as.socket);
             return lc_string(ctx, buf);
+        case LC_COROUTINE:
+            snprintf(buf, sizeof(buf), "thread: %p", (void *)v.as.coroutine);
+            return lc_string(ctx, buf);
+        case LC_FFI:
+            snprintf(buf, sizeof(buf), "ffi.library: %p", (void *)v.as.ffi);
+            return lc_string(ctx, buf);
         default: return lc_string(ctx, "nil");
     }
 }
 
 static const char *lc_type_name(LcValue v) {
-    static const char *names[] = {"nil", "boolean", "number", "string", "table", "function", "tuple", "userdata", "userdata", "userdata"};
+    static const char *names[] = {"nil", "boolean", "number", "number", "string", "table", "function", "tuple", "userdata", "userdata", "userdata", "thread", "userdata"};
     v = lc_first_value(v);
     return names[(int)v.type];
 }
@@ -688,13 +767,22 @@ static LcValue lc_binary(LcContext *ctx, int op, LcValue a, LcValue b) {
     switch (op) {
         case 0: case 1: case 2: case 3: case 4: case 5: case 6: {
             static const char *names[] = {"__add", "__sub", "__mul", "__div", "__idiv", "__mod", "__pow"};
-            if ((a.type != LC_NUMBER && a.type != LC_STRING) || (b.type != LC_NUMBER && b.type != LC_STRING)) {
+            if (!lc_is_numeric(a) || !lc_is_numeric(b)) {
                 LcValue meta = lc_call_metamethod(ctx, a, b, names[op]);
                 if (meta.type != LC_NIL) return meta;
                 lc_release(ctx, meta);
             }
             x = lc_to_number(ctx, a, &ok1); y = lc_to_number(ctx, b, &ok2);
             if (!ok1 || !ok2) return r;
+            if (a.type == LC_INTEGER && b.type == LC_INTEGER && op != 3 && op != 6) {
+                int64_t ix = a.as.integer, iy = b.as.integer;
+                if (op == 0) return lc_integer((int64_t)((uint64_t)ix + (uint64_t)iy));
+                if (op == 1) return lc_integer((int64_t)((uint64_t)ix - (uint64_t)iy));
+                if (op == 2) return lc_integer((int64_t)((uint64_t)ix * (uint64_t)iy));
+                if (iy == 0) { lc_error(ctx, "division by zero"); return r; }
+                if (op == 4) { int64_t q, rem; if (ix == INT64_MIN && iy == -1) return lc_integer(INT64_MIN); q = ix / iy; rem = ix % iy; if (rem && ((rem < 0) != (iy < 0))) --q; return lc_integer(q); }
+                if (op == 5) { int64_t rem; if (ix == INT64_MIN && iy == -1) return lc_integer(0); rem = ix % iy; if (rem && ((rem < 0) != (iy < 0))) rem += iy; return lc_integer(rem); }
+            }
             if (op == 0) return lc_number(x + y);
             if (op == 1) return lc_number(x - y);
             if (op == 2) return lc_number(x * y);
@@ -713,11 +801,13 @@ static LcValue lc_binary(LcContext *ctx, int op, LcValue a, LcValue b) {
             return lc_bool(op == 7 ? equal : !equal);
         }
         case 9: case 10: case 11: case 12:
-            if (a.type == LC_NUMBER && b.type == LC_NUMBER) {
-                if (op == 9) return lc_bool(a.as.number < b.as.number);
-                if (op == 10) return lc_bool(a.as.number <= b.as.number);
-                if (op == 11) return lc_bool(a.as.number > b.as.number);
-                return lc_bool(a.as.number >= b.as.number);
+            if ((a.type == LC_NUMBER || a.type == LC_INTEGER) && (b.type == LC_NUMBER || b.type == LC_INTEGER)) {
+                long double lx = a.type == LC_INTEGER ? (long double)a.as.integer : (long double)a.as.number;
+                long double ly = b.type == LC_INTEGER ? (long double)b.as.integer : (long double)b.as.number;
+                if (op == 9) return lc_bool(lx < ly);
+                if (op == 10) return lc_bool(lx <= ly);
+                if (op == 11) return lc_bool(lx > ly);
+                return lc_bool(lx >= ly);
             }
             if (a.type == LC_STRING && b.type == LC_STRING) {
                 size_t n = a.as.string->length < b.as.string->length ? a.as.string->length : b.as.string->length;
@@ -742,7 +832,7 @@ static LcValue lc_binary(LcContext *ctx, int op, LcValue a, LcValue b) {
             lc_error(ctx, "attempt to compare incompatible values"); return r;
         case 13: {
             LcValue sa, sb;
-            if ((a.type != LC_NUMBER && a.type != LC_STRING) || (b.type != LC_NUMBER && b.type != LC_STRING)) {
+            if (!lc_is_numeric(a) || !lc_is_numeric(b)) {
                 LcValue meta = lc_call_metamethod(ctx, a, b, "__concat");
                 if (meta.type != LC_NIL) return meta;
                 lc_release(ctx, meta);
@@ -764,31 +854,31 @@ static LcValue lc_binary(LcContext *ctx, int op, LcValue a, LcValue b) {
         case 16: case 17: case 18: {
             static const char *names[] = {"__band", "__bor", "__bxor"};
             int64_t x64, y64;
-            if ((a.type != LC_NUMBER && a.type != LC_STRING) || (b.type != LC_NUMBER && b.type != LC_STRING)) {
+            if (!lc_is_numeric(a) || !lc_is_numeric(b)) {
                 LcValue meta = lc_call_metamethod(ctx, a, b, names[op - 16]);
                 if (meta.type != LC_NIL) return meta;
                 lc_release(ctx, meta);
             }
             x64 = lc_to_integer(ctx, a); y64 = lc_to_integer(ctx, b);
             if (ctx->error) return r;
-            if (op == 16) return lc_number((double)(x64 & y64));
-            if (op == 17) return lc_number((double)(x64 | y64));
-            return lc_number((double)(x64 ^ y64));
+            if (op == 16) return lc_integer(x64 & y64);
+            if (op == 17) return lc_integer(x64 | y64);
+            return lc_integer(x64 ^ y64);
         }
         case 19: case 20: {
             int64_t x64, count;
             int left = op == 19;
-            if ((a.type != LC_NUMBER && a.type != LC_STRING) || (b.type != LC_NUMBER && b.type != LC_STRING)) {
+            if (!lc_is_numeric(a) || !lc_is_numeric(b)) {
                 LcValue meta = lc_call_metamethod(ctx, a, b, left ? "__shl" : "__shr");
                 if (meta.type != LC_NIL) return meta;
                 lc_release(ctx, meta);
             }
             x64 = lc_to_integer(ctx, a); count = lc_to_integer(ctx, b);
             if (ctx->error) return r;
-            if (count < 0) { left = !left; if (count == INT64_MIN) return lc_number(0); count = -count; }
-            if (count >= 64) return lc_number(0);
-            if (left) return lc_number((double)(int64_t)((uint64_t)x64 << (unsigned)count));
-            return lc_number((double)(int64_t)(x64 >> (unsigned)count));
+            if (count < 0) { left = !left; if (count == INT64_MIN) return lc_integer(0); count = -count; }
+            if (count >= 64) return lc_integer(0);
+            if (left) return lc_integer((int64_t)((uint64_t)x64 << (unsigned)count));
+            return lc_integer(x64 >> (unsigned)count);
         }
         default: return r;
     }
@@ -799,20 +889,21 @@ static LcValue lc_unary(LcContext *ctx, int op, LcValue a) {
     a = lc_first_value(a);
     if (op == 0) return lc_bool(!lc_truthy(a));
     if (op == 1) {
-        if (a.type != LC_NUMBER && a.type != LC_STRING) {
+        if (!lc_is_numeric(a)) {
             LcValue meta = lc_call_metamethod(ctx, a, a, "__unm");
             if (meta.type != LC_NIL) return meta;
             lc_release(ctx, meta);
         }
+        if (a.type == LC_INTEGER) return lc_integer((int64_t)(0 - (uint64_t)a.as.integer));
         return lc_number(-lc_to_number(ctx, a, &ok));
     }
     if (op == 4) {
-        if (a.type != LC_NUMBER && a.type != LC_STRING) {
+        if (!lc_is_numeric(a)) {
             LcValue meta = lc_call_metamethod(ctx, a, a, "__bnot");
             if (meta.type != LC_NIL) return meta;
             lc_release(ctx, meta);
         }
-        return lc_number((double)~lc_to_integer(ctx, a));
+        return lc_integer(~lc_to_integer(ctx, a));
     }
     if (op == 2) {
         if (a.type == LC_STRING) return lc_number((double)a.as.string->length);
@@ -828,6 +919,150 @@ static LcValue lc_unary(LcContext *ctx, int op, LcValue a) {
         lc_error(ctx, "attempt to get length of a %s value", lc_type_name(a));
     }
     return lc_nil();
+}
+
+/* Stackful coroutines preserve generated C locals and closure frames. Unix
+   uses ucontext; Windows uses native Fibers. No source Lua VM is involved. */
+#ifndef _WIN32
+static LcContext *lc_coroutine_boot_context;
+static void lc_coroutine_entry(void);
+#else
+static void WINAPI lc_coroutine_entry(void *parameter);
+static LcContext *lc_windows_coroutine_context;
+#endif
+static LcValue lc_coroutine_value(LcCoroutine *co) {
+    LcValue v = lc_nil(); v.type = LC_COROUTINE; v.as.coroutine = co; return v;
+}
+static LcValue lc_coroutine_new(LcContext *ctx, LcValue function) {
+    LcCoroutine *co;
+    if (lc_first_value(function).type != LC_FUNCTION) { lc_error(ctx, "function expected"); return lc_nil(); }
+    co = (LcCoroutine *)lc_alloc(ctx, sizeof(*co), LC_COROUTINE);
+    if (!co) return lc_nil();
+    co->function = lc_retain(lc_first_value(function)); co->stack_size = 1024 * 1024;
+#ifndef _WIN32
+    co->stack = malloc(co->stack_size);
+    if (!co->stack) { lc_release(ctx, lc_coroutine_value(co)); lc_error(ctx, "out of memory creating coroutine stack"); return lc_nil(); }
+    if (getcontext(&co->context) != 0) { free(co->stack); co->stack = NULL; lc_release(ctx, lc_coroutine_value(co)); lc_error(ctx, "cannot create coroutine context"); return lc_nil(); }
+    co->context.uc_stack.ss_sp = co->stack; co->context.uc_stack.ss_size = co->stack_size; co->context.uc_link = NULL;
+    makecontext(&co->context, lc_coroutine_entry, 0);
+#else
+    co->fiber = CreateFiber(co->stack_size, lc_coroutine_entry, co);
+    if (!co->fiber) { lc_release(ctx, lc_coroutine_value(co)); lc_error(ctx, "cannot create coroutine fiber"); return lc_nil(); }
+#endif
+    return lc_coroutine_value(co);
+}
+static LcValue lc_coroutine_pack(LcContext *ctx, int success, LcValue values) {
+    LcTuple *tuple; int i, n; LcValue *items, result;
+    if (values.type == LC_TUPLE) { tuple = values.as.tuple; n = tuple->count + 1; }
+    else { tuple = NULL; n = 2; }
+    items = (LcValue *)malloc(sizeof(LcValue) * (size_t)n);
+    if (!items) { lc_release(ctx, values); lc_error(ctx, "out of memory"); return lc_nil(); }
+    items[0] = lc_bool(success);
+    if (tuple) for (i = 1; i < n; ++i) items[i] = lc_retain(tuple->items[i - 1]);
+    else items[1] = lc_retain(values);
+    lc_release(ctx, values); result = lc_tuple_new(ctx, n, items, 1); free(items); return result;
+}
+static LcValue lc_coroutine_resume_value(LcContext *ctx, LcCoroutine *co, int argc, LcValue *argv) {
+    LcCoroutine *parent = ctx->active_coroutine; LcValue out;
+    if (!co || co->state == 2) { out = lc_string(ctx, "cannot resume dead coroutine"); return lc_coroutine_pack(ctx, 0, out); }
+    if (co->state == 1 || co == parent) { out = lc_string(ctx, "cannot resume running coroutine"); return lc_coroutine_pack(ctx, 0, out); }
+    if (co->state == 3) { out = lc_string(ctx, "cannot resume failed coroutine"); return lc_coroutine_pack(ctx, 0, out); }
+    lc_release(ctx, co->resume_args); co->resume_args = lc_tuple_new(ctx, argc, argv, 0);
+    lc_release(ctx, co->yielded); co->yielded = lc_nil(); lc_release(ctx, co->result); co->result = lc_nil();
+    co->state = 1; ctx->active_coroutine = co;
+#ifndef _WIN32
+    lc_coroutine_boot_context = ctx;
+    if (swapcontext(&co->caller, &co->context) != 0) {
+        ctx->active_coroutine = parent; co->state = 3;
+        out = lc_string(ctx, "coroutine context switch failed"); return lc_coroutine_pack(ctx, 0, out);
+    }
+#else
+    lc_windows_coroutine_context = ctx;
+    if (!IsThreadAFiber() && !ConvertThreadToFiber(NULL)) { ctx->active_coroutine = parent; out = lc_string(ctx, "cannot convert thread to a fiber"); return lc_coroutine_pack(ctx, 0, out); }
+    co->caller_fiber = GetCurrentFiber();
+    if (!co->caller_fiber) { ctx->active_coroutine = parent; out = lc_string(ctx, "coroutine resume requires a fiber thread"); return lc_coroutine_pack(ctx, 0, out); }
+    SwitchToFiber(co->fiber);
+#endif
+    ctx->active_coroutine = parent;
+    if (ctx->error || co->state == 3) {
+        out = lc_string(ctx, ctx->error ? ctx->message : "coroutine failed");
+        ctx->error = 0; ctx->message[0] = 0; co->state = 3;
+        return lc_coroutine_pack(ctx, 0, out);
+    }
+    return lc_coroutine_pack(ctx, 1, lc_retain(co->state == 2 ? co->result : co->yielded));
+}
+static LcValue lc_builtin_coroutine_create(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    (void)self; return lc_coroutine_new(ctx, argc ? argv[0] : lc_nil());
+}
+static LcValue lc_builtin_coroutine_resume(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    LcValue value = argc ? lc_first_value(argv[0]) : lc_nil(); (void)self;
+    if (value.type != LC_COROUTINE) { LcValue error = lc_string(ctx, "coroutine expected"); return lc_coroutine_pack(ctx, 0, error); }
+    return lc_coroutine_resume_value(ctx, value.as.coroutine, argc - 1, argv + 1);
+}
+static LcValue lc_builtin_coroutine_yield(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    LcCoroutine *co = ctx->active_coroutine; LcValue result; (void)self;
+    if (!co) { lc_error(ctx, "attempt to yield from outside a coroutine"); return lc_nil(); }
+    lc_release(ctx, co->yielded); co->yielded = lc_tuple_new(ctx, argc, argv, 0);
+    lc_release(ctx, co->resume_args); co->resume_args = lc_nil(); co->state = 0;
+#ifndef _WIN32
+    if (swapcontext(&co->context, &co->caller) != 0) { lc_error(ctx, "coroutine yield failed"); return lc_nil(); }
+#else
+    SwitchToFiber(co->caller_fiber);
+#endif
+    result = lc_retain(co->resume_args); lc_release(ctx, co->resume_args); co->resume_args = lc_nil(); return result;
+}
+#ifndef _WIN32
+static void lc_coroutine_entry(void) {
+    LcContext *ctx = lc_coroutine_boot_context; LcCoroutine *co = ctx->active_coroutine;
+    int argc = co->resume_args.type == LC_TUPLE ? co->resume_args.as.tuple->count : 0;
+    LcValue *argv = argc ? co->resume_args.as.tuple->items : NULL;
+    co->started = 1; lc_release(ctx, co->result); co->result = lc_call_list(ctx, co->function, argc, argv);
+    lc_release(ctx, co->resume_args); co->resume_args = lc_nil(); co->state = ctx->error ? 3 : 2;
+    setcontext(&co->caller); abort();
+}
+#else
+static void WINAPI lc_coroutine_entry(void *parameter) {
+    LcCoroutine *co = (LcCoroutine *)parameter; LcContext *ctx = lc_windows_coroutine_context;
+    int argc = co->resume_args.type == LC_TUPLE ? co->resume_args.as.tuple->count : 0;
+    LcValue *argv = argc ? co->resume_args.as.tuple->items : NULL;
+    co->started = 1; lc_release(ctx, co->result); co->result = lc_call_list(ctx, co->function, argc, argv);
+    lc_release(ctx, co->resume_args); co->resume_args = lc_nil(); co->state = ctx->error ? 3 : 2;
+    SwitchToFiber(co->caller_fiber);
+}
+#endif
+static LcValue lc_builtin_coroutine_status(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    LcValue value = argc ? lc_first_value(argv[0]) : lc_nil(); (void)self;
+    if (value.type != LC_COROUTINE) { lc_error(ctx, "coroutine expected"); return lc_nil(); }
+    if (value.as.coroutine == ctx->active_coroutine) return lc_string(ctx, "running");
+    if (value.as.coroutine->state == 0) return lc_string(ctx, "suspended");
+    return lc_string(ctx, "dead");
+}
+static LcValue lc_builtin_coroutine_running(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    LcValue out[2]; (void)self; (void)argc; (void)argv;
+    if (!ctx->active_coroutine) { out[0] = lc_nil(); out[1] = lc_bool(1); }
+    else { out[0] = lc_retain(lc_coroutine_value(ctx->active_coroutine)); out[1] = lc_bool(0); }
+    return lc_tuple_new(ctx, 2, out, 1);
+}
+static LcValue lc_builtin_coroutine_isyieldable(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    (void)self; (void)argc; (void)argv; return lc_bool(ctx->active_coroutine != NULL);
+}
+static LcValue lc_builtin_coroutine_wrap_call(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    LcValue packed = lc_coroutine_resume_value(ctx, self->upvalues[0]->value.as.coroutine, argc, argv), first, rest;
+    if (packed.type != LC_TUPLE || !packed.as.tuple->count) return packed;
+    first = packed.as.tuple->items[0];
+    if (!lc_truthy(first)) {
+        LcValue message = packed.as.tuple->count > 1 ? packed.as.tuple->items[1] : lc_string(ctx, "coroutine failed");
+        if (message.type == LC_STRING) lc_error(ctx, "%s", message.as.string->data); else lc_error(ctx, "coroutine failed");
+        lc_release(ctx, packed); return lc_nil();
+    }
+    rest = lc_tuple_new(ctx, packed.as.tuple->count - 1, packed.as.tuple->items + 1, 0); lc_release(ctx, packed); return rest;
+}
+static LcValue lc_builtin_coroutine_wrap(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    LcValue co = lc_coroutine_new(ctx, argc ? argv[0] : lc_nil()), result; LcCell *up; (void)self;
+    if (co.type != LC_COROUTINE) return co;
+    up = lc_cell_new(ctx, lc_retain(co));
+    result = lc_function_new(ctx, lc_builtin_coroutine_wrap_call, 1, &up, "coroutine.wrap");
+    lc_release(ctx, co); return result;
 }
 
 /* Built-in library. */
@@ -880,7 +1115,7 @@ static LcValue lc_builtin_tonumber(LcContext *ctx, LcFunction *self, int argc, L
         while (i < length && isspace((unsigned char)text[i])) ++i;
         return any && i == length ? lc_number(sign * value) : lc_nil();
       }
-      if (v.type == LC_NUMBER) return lc_retain(v);
+      if (v.type == LC_NUMBER || v.type == LC_INTEGER) return lc_retain(v);
       if (v.type == LC_STRING) { char *end; n = strtod(v.as.string->data, &end); while (isspace((unsigned char)*end)) ++end;
         if (end != v.as.string->data && !*end) return lc_number(n); }
       (void)ok; return lc_nil(); }
@@ -1034,10 +1269,165 @@ static LcValue lc_builtin_getmetatable(LcContext *ctx, LcFunction *self, int arg
     lc_release(ctx, key);
     return guard.type != LC_NIL ? guard : lc_retain(value.as.table->metatable);
 }
+static int lc_table_weak_mode(LcTable *table) {
+    size_t i; int mode = 0;
+    LcTable *meta;
+    if (table->metatable.type != LC_TABLE) return 0;
+    meta = table->metatable.as.table;
+    for (i = 0; i < meta->capacity; ++i) if (meta->entries[i].used) {
+        LcValue key = meta->entries[i].key, value = meta->entries[i].value;
+        if (key.type == LC_STRING && key.as.string->length == 6 && !memcmp(key.as.string->data, "__mode", 6) && value.type == LC_STRING) {
+            if (memchr(value.as.string->data, 'k', value.as.string->length)) mode |= 1;
+            if (memchr(value.as.string->data, 'v', value.as.string->length)) mode |= 2;
+        }
+    }
+    return mode;
+}
+static void lc_gc_count_edge(LcValue value) {
+    LcObject *object = lc_value_object(lc_first_value(value));
+    if (object) ++object->gc_incoming;
+}
+static void lc_gc_count_cell(LcCell *cell) { if (cell) ++cell->object.gc_incoming; }
+static void lc_gc_mark_object(LcObject *object);
+static void lc_gc_mark_edge(LcValue value) {
+    LcObject *object = lc_value_object(lc_first_value(value));
+    if (object) lc_gc_mark_object(object);
+}
+static void lc_gc_mark_object(LcObject *object) {
+    size_t i;
+    if (!object || object->gc_mark) return;
+    object->gc_mark = 1;
+    if (object->kind == LC_TABLE) {
+        LcTable *table = (LcTable *)object; int weak = lc_table_weak_mode(table);
+        for (i = 0; i < table->capacity; ++i) if (table->entries[i].used) {
+            if (!(weak & 1)) lc_gc_mark_edge(table->entries[i].key);
+            if (!(weak & 2)) lc_gc_mark_edge(table->entries[i].value);
+        }
+        lc_gc_mark_edge(table->metatable);
+    } else if (object->kind == LC_FUNCTION) {
+        LcFunction *function = (LcFunction *)object;
+        for (i = 0; i < (size_t)function->upvalue_count; ++i) lc_gc_mark_object((LcObject *)function->upvalues[i]);
+    } else if (object->kind == 100) lc_gc_mark_edge(((LcCell *)object)->value);
+    else if (object->kind == LC_TUPLE) {
+        LcTuple *tuple = (LcTuple *)object;
+        for (i = 0; i < (size_t)tuple->count; ++i) lc_gc_mark_edge(tuple->items[i]);
+    } else if (object->kind == LC_COROUTINE) {
+        LcCoroutine *co = (LcCoroutine *)object;
+        lc_gc_mark_edge(co->function); lc_gc_mark_edge(co->resume_args); lc_gc_mark_edge(co->yielded); lc_gc_mark_edge(co->result);
+    }
+}
+static LcValue lc_gc_object_value(LcObject *object) {
+    LcValue value = lc_nil();
+    switch (object->kind) {
+        case LC_STRING: value.type = LC_STRING; value.as.string = (LcString *)object; break;
+        case LC_TABLE: value.type = LC_TABLE; value.as.table = (LcTable *)object; break;
+        case LC_FUNCTION: value.type = LC_FUNCTION; value.as.function = (LcFunction *)object; break;
+        case LC_TUPLE: value.type = LC_TUPLE; value.as.tuple = (LcTuple *)object; break;
+        case LC_FILE: value.type = LC_FILE; value.as.file = (LcFile *)object; break;
+        case LC_SOCKET: value.type = LC_SOCKET; value.as.socket = (LcSocket *)object; break;
+        case LC_AUDIO: value.type = LC_AUDIO; value.as.audio = (LcAudio *)object; break;
+        case LC_COROUTINE: value.type = LC_COROUTINE; value.as.coroutine = (LcCoroutine *)object; break;
+        case LC_FFI: value.type = LC_FFI; value.as.ffi = (LcFFILibrary *)object; break;
+        default: return value;
+    }
+    return value;
+}
+static void lc_gc_collect(LcContext *ctx) {
+    LcObject *object, *next;
+    if (!ctx || ctx->gc_collecting) return;
+    ctx->gc_collecting = 1;
+    for (object = ctx->objects; object; object = object->next) { object->gc_incoming = 0; object->gc_mark = 0; }
+    /* Count all retained incoming references, including weak table edges.
+       A reference held directly by generated C/native code is therefore an
+       external root; weak edges participate in refcounting but not marking. */
+    for (object = ctx->objects; object; object = object->next) {
+        size_t i;
+        if (object->kind == LC_TABLE) {
+            LcTable *table = (LcTable *)object;
+            for (i = 0; i < table->capacity; ++i) if (table->entries[i].used) {
+                lc_gc_count_edge(table->entries[i].key); lc_gc_count_edge(table->entries[i].value);
+            }
+            lc_gc_count_edge(table->metatable);
+        } else if (object->kind == LC_FUNCTION) {
+            LcFunction *function = (LcFunction *)object;
+            for (i = 0; i < (size_t)function->upvalue_count; ++i) lc_gc_count_cell(function->upvalues[i]);
+        } else if (object->kind == 100) lc_gc_count_edge(((LcCell *)object)->value);
+        else if (object->kind == LC_TUPLE) {
+            LcTuple *tuple = (LcTuple *)object;
+            for (i = 0; i < (size_t)tuple->count; ++i) lc_gc_count_edge(tuple->items[i]);
+        } else if (object->kind == LC_COROUTINE) {
+            LcCoroutine *co = (LcCoroutine *)object;
+            lc_gc_count_edge(co->function); lc_gc_count_edge(co->resume_args); lc_gc_count_edge(co->yielded); lc_gc_count_edge(co->result);
+        }
+    }
+    for (object = ctx->objects; object; object = object->next)
+        if (object->refs > object->gc_incoming) lc_gc_mark_object(object);
+    /* Clear dead weak entries before any pointee is destroyed. */
+    for (object = ctx->objects; object; object = object->next) if (object->kind == LC_TABLE && object->gc_mark) {
+        LcTable *table = (LcTable *)object; int weak = lc_table_weak_mode(table); size_t i;
+        if (!weak) continue;
+        for (i = 0; i < table->capacity; ++i) if (table->entries[i].used) {
+            LcObject *key = lc_value_object(table->entries[i].key), *value = lc_value_object(table->entries[i].value);
+            if (((weak & 1) && key && !key->gc_mark) || ((weak & 2) && value && !value->gc_mark)) {
+                lc_release(ctx, table->entries[i].key); lc_release(ctx, table->entries[i].value);
+                memset(&table->entries[i], 0, sizeof(table->entries[i]));
+            }
+        }
+    }
+    /* Disconnect the whole unreachable graph before freeing any node. Only
+       edges into the live graph need refcount decrements; unreachable nodes
+       are forcibly destroyed below, regardless of their residual counts. */
+    for (object = ctx->objects; object; object = object->next) if (!object->gc_mark) {
+        size_t i;
+#define LC_GC_RELEASE_LIVE(v) do { LcValue lc_gc_v = (v); LcObject *lc_gc_o = lc_value_object(lc_gc_v); if (!lc_gc_o || lc_gc_o->gc_mark) lc_release(ctx, lc_gc_v); } while (0)
+        if (object->kind == LC_TABLE) {
+            LcTable *table = (LcTable *)object;
+            for (i = 0; i < table->capacity; ++i) if (table->entries[i].used) {
+                LC_GC_RELEASE_LIVE(table->entries[i].key); LC_GC_RELEASE_LIVE(table->entries[i].value);
+                memset(&table->entries[i], 0, sizeof(table->entries[i]));
+            }
+            LC_GC_RELEASE_LIVE(table->metatable); table->metatable = lc_nil();
+        } else if (object->kind == LC_FUNCTION) {
+            LcFunction *function = (LcFunction *)object;
+            for (i = 0; i < (size_t)function->upvalue_count; ++i)
+                if (function->upvalues[i]->object.gc_mark) lc_cell_release(ctx, function->upvalues[i]);
+            function->upvalue_count = 0;
+        } else if (object->kind == LC_TUPLE) {
+            LcTuple *tuple = (LcTuple *)object;
+            for (i = 0; i < (size_t)tuple->count; ++i) LC_GC_RELEASE_LIVE(tuple->items[i]);
+            tuple->count = 0;
+        } else if (object->kind == LC_COROUTINE) {
+            LcCoroutine *co = (LcCoroutine *)object;
+            LC_GC_RELEASE_LIVE(co->function); LC_GC_RELEASE_LIVE(co->resume_args); LC_GC_RELEASE_LIVE(co->yielded); LC_GC_RELEASE_LIVE(co->result);
+            co->function = co->resume_args = co->yielded = co->result = lc_nil();
+        } else if (object->kind == 100) {
+            LcCell *cell = (LcCell *)object; LC_GC_RELEASE_LIVE(cell->value); cell->value = lc_nil();
+        }
+#undef LC_GC_RELEASE_LIVE
+    }
+    for (object = ctx->objects; object;) {
+        next = object->next;
+        if (!object->gc_mark && object->kind != 100) lc_free_value(ctx, lc_gc_object_value(object));
+        object = next;
+    }
+    for (object = ctx->objects; object;) {
+        next = object->next;
+        if (!object->gc_mark && object->kind == 100) {
+            lc_release(ctx, ((LcCell *)object)->value);
+            lc_unlink(ctx, object); free(object);
+        }
+        object = next;
+    }
+    ctx->gc_collecting = 0;
+}
+
 static LcValue lc_builtin_collectgarbage(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
     const char *option = argc && lc_first_value(argv[0]).type == LC_STRING ? lc_first_value(argv[0]).as.string->data : "collect";
     (void)self;
-    if (!strcmp(option, "isrunning")) return lc_bool(0); /* There is no tracing collector. */
+    if (!strcmp(option, "isrunning")) return lc_bool(ctx->gc_enabled);
+    if (!strcmp(option, "stop")) { ctx->gc_enabled = 0; return lc_number(0); }
+    if (!strcmp(option, "restart")) { ctx->gc_enabled = 1; return lc_number(0); }
+    if (!strcmp(option, "collect") || !strcmp(option, "step")) { lc_gc_collect(ctx); return lc_number(0); }
     if (!strcmp(option, "count")) {
         size_t bytes = 0;
         LcObject *object;
@@ -1046,6 +1436,7 @@ static LcValue lc_builtin_collectgarbage(LcContext *ctx, LcFunction *self, int a
             else if (object->kind == LC_TABLE) { LcTable *t = (LcTable *)object; bytes += sizeof(*t) + t->capacity * sizeof(LcEntry); }
             else if (object->kind == LC_FUNCTION) { LcFunction *f = (LcFunction *)object; bytes += sizeof(*f) + (size_t)f->upvalue_count * sizeof(LcCell *); }
             else if (object->kind == LC_TUPLE) bytes += sizeof(LcTuple) + (size_t)((LcTuple *)object)->count * sizeof(LcValue);
+            else if (object->kind == LC_COROUTINE) bytes += sizeof(LcCoroutine) + ((LcCoroutine *)object)->stack_size;
             else bytes += sizeof(LcCell);
         }
         { LcValue out[2]; out[0] = lc_number((double)bytes / 1024.0); out[1] = lc_number((double)(bytes % 1024)); return lc_tuple_new(ctx, 2, out, 1); }
@@ -1065,6 +1456,13 @@ static LcValue lc_package_table(LcContext *ctx, const char *name) {
     lc_release(ctx, key); key = lc_string(ctx, name); field = lc_table_raw_get(ctx, package, key);
     lc_release(ctx, key); lc_release(ctx, package); return field;
 }
+static void lc_preload_native(LcContext *ctx, const char *name, LcNative native) {
+    LcValue preload = lc_package_table(ctx, "preload"), key = lc_string(ctx, name);
+    LcValue function = lc_function_new(ctx, native, 0, NULL, name);
+    lc_table_set(ctx, preload, key, function);
+    lc_release(ctx, preload); lc_release(ctx, key); lc_release(ctx, function);
+}
+
 static LcValue lc_builtin_require(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
     LcValue loaded, preload, name, loader, result;
     (void)self;
@@ -1074,11 +1472,14 @@ static LcValue lc_builtin_require(LcContext *ctx, LcFunction *self, int argc, Lc
     lc_release(ctx, result); preload = lc_package_table(ctx, "preload"); loader = lc_table_get(ctx, preload, name);
     if (loader.type != LC_FUNCTION) {
         lc_release(ctx, loaded); lc_release(ctx, preload); lc_release(ctx, loader);
-        lc_error(ctx, "module '%s' not found in package.preload (dynamic file loading is not linked)", name.as.string->data);
+        lc_error(ctx, "module '%s' not found (literal disk requires must be linked at compile time)", name.as.string->data);
         return lc_nil();
     }
+    /* Mark the module before execution so recursive requires terminate just
+       like Lua's package.loaded cycle guard. */
+    lc_table_set(ctx, loaded, name, lc_bool(1));
     result = lc_call(ctx, loader, 1, &name);
-    if (ctx->error) { lc_release(ctx, loaded); lc_release(ctx, preload); lc_release(ctx, loader); lc_release(ctx, result); return lc_nil(); }
+    if (ctx->error) { LcValue nil = lc_nil(); lc_table_set(ctx, loaded, name, nil); lc_release(ctx, loaded); lc_release(ctx, preload); lc_release(ctx, loader); lc_release(ctx, result); return lc_nil(); }
     if (result.type != LC_NIL) lc_table_set(ctx, loaded, name, result);
     { LcValue check = lc_table_get(ctx, loaded, name);
       if (check.type == LC_NIL) { lc_table_set(ctx, loaded, name, lc_bool(1)); lc_release(ctx, check); check = lc_table_get(ctx, loaded, name); }
@@ -1141,10 +1542,12 @@ static LcValue lc_math_other(LcContext *ctx, LcFunction *self, int argc, LcValue
         out[0] = lc_number(mantissa); out[1] = lc_number(exponent); return lc_tuple_new(ctx, 2, out, 1);
     }
     if (!strcmp(self->name, "tointeger")) {
-        if (!isfinite(x) || floor(x) != x) return lc_nil();
-        return lc_number(x);
+        LcValue value = argc ? lc_first_value(argv[0]) : lc_nil();
+        if (value.type == LC_INTEGER) return lc_retain(value);
+        if (!isfinite(x) || floor(x) != x || x < -9223372036854775808.0 || x >= 9223372036854775808.0) return lc_nil();
+        return lc_integer((int64_t)x);
     }
-    if (!strcmp(self->name, "type")) return lc_string(ctx, isfinite(x) && floor(x) == x ? "integer" : "float");
+    if (!strcmp(self->name, "type")) { LcValue value = argc ? lc_first_value(argv[0]) : lc_nil(); return lc_string(ctx, value.type == LC_INTEGER ? "integer" : "float"); }
     if (!strcmp(self->name, "ult")) return lc_bool((uint64_t)(int64_t)x < (uint64_t)lc_to_integer(ctx, argc > 1 ? argv[1] : lc_nil()));
     return lc_nil();
 }
@@ -1574,7 +1977,7 @@ static LcValue lc_string_format(LcContext *ctx, LcFunction *self, int argc, LcVa
                             else lc_text_add(ctx, &output, (const char *)&ch, 1);
                         }
                         lc_text_add(ctx, &output, "\"", 1);
-                    } else if (value.type == LC_NIL || value.type == LC_BOOL || value.type == LC_NUMBER) {
+                    } else if (value.type == LC_NIL || value.type == LC_BOOL || value.type == LC_NUMBER || value.type == LC_INTEGER) {
                         LcValue string = lc_to_string(ctx, value); lc_text_add(ctx, &output, string.as.string->data, string.as.string->length); lc_release(ctx, string);
                     } else lc_error(ctx, "%q expects a string, number, boolean or nil");
                     written = -2;
@@ -1991,7 +2394,7 @@ static LcValue lc_file_write(LcContext *ctx, LcFunction *self, int argc, LcValue
     if (!file) return lc_nil();
     for (i = 1; i < argc; ++i) {
         LcValue value = lc_first_value(argv[i]), string;
-        if (value.type != LC_STRING && value.type != LC_NUMBER) { lc_error(ctx, "file:write expects strings or numbers"); return lc_nil(); }
+        if (value.type != LC_STRING && value.type != LC_NUMBER && value.type != LC_INTEGER) { lc_error(ctx, "file:write expects strings or numbers"); return lc_nil(); }
         string = lc_to_string(ctx, value);
         if (fwrite(string.as.string->data, 1, string.as.string->length, file->handle) != string.as.string->length) {
             lc_release(ctx, string); return lc_file_failure(ctx, "write");
@@ -2008,7 +2411,7 @@ static LcValue lc_file_read(LcContext *ctx, LcFunction *self, int argc, LcValue 
     if (!results) { lc_error(ctx, "out of memory in file:read"); return lc_nil(); }
     for (i = 0; i < formats; ++i) {
         LcValue format = argc > 1 ? lc_first_value(argv[i + 1]) : lc_string(ctx, "*l");
-        if (format.type == LC_NUMBER) {
+        if (format.type == LC_NUMBER || format.type == LC_INTEGER) {
             int wanted = (int)format.as.number;
             char *bytes; size_t got;
             if (wanted < 0) { lc_error(ctx, "invalid read count"); break; }
@@ -2293,6 +2696,7 @@ static LcContext *lc_context_new(const char *source) {
     if (!ctx) return NULL;
     ctx->source = source;
     ctx->tls_verify = 1;
+    ctx->gc_enabled = 1;
     ctx->globals = lc_table(ctx);
     lc_set_global(ctx, "print", lc_function_new(ctx, lc_builtin_print, 0, NULL, "print"));
     lc_set_global(ctx, "type", lc_function_new(ctx, lc_builtin_type, 0, NULL, "type"));
@@ -2327,8 +2731,8 @@ static LcContext *lc_context_new(const char *source) {
     lc_add_native(ctx, math, "tointeger", lc_math_other); lc_add_native(ctx, math, "type", lc_math_other);
     lc_add_native(ctx, math, "ult", lc_math_other);
     lc_set_field(ctx, math, "pi", lc_number(3.14159265358979323846)); lc_set_field(ctx, math, "huge", lc_number(HUGE_VAL));
-    lc_set_field(ctx, math, "maxinteger", lc_number(9007199254740991.0));
-    lc_set_field(ctx, math, "mininteger", lc_number(-9007199254740991.0));
+    lc_set_field(ctx, math, "maxinteger", lc_integer(INT64_MAX));
+    lc_set_field(ctx, math, "mininteger", lc_integer(INT64_MIN));
     lc_set_global(ctx, "math", math);
     str = lc_table(ctx); lc_add_native(ctx, str, "len", lc_string_len); lc_add_native(ctx, str, "sub", lc_string_sub);
     lc_add_native(ctx, str, "upper", lc_string_case); lc_add_native(ctx, str, "lower", lc_string_case); lc_add_native(ctx, str, "rep", lc_string_rep);
@@ -2422,6 +2826,14 @@ static void lc_context_destroy(LcContext *ctx) {
         }
         else if (o->kind == LC_SOCKET) lc_socket_close_handle((LcSocket *)o);
         else if (o->kind == LC_AUDIO) { lc_audio_dispose((LcAudio *)o); free(((LcAudio *)o)->samples); }
+        else if (o->kind == LC_FFI) lc_ffi_dispose((LcFFILibrary *)o);
+        else if (o->kind == LC_COROUTINE) {
+#ifdef _WIN32
+            if (((LcCoroutine *)o)->fiber) DeleteFiber(((LcCoroutine *)o)->fiber);
+#else
+            free(((LcCoroutine *)o)->stack);
+#endif
+        }
         free(o); o = next;
     }
 #ifdef _WIN32

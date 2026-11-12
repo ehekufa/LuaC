@@ -298,7 +298,7 @@ static LcValue lc_url_build(LcContext *ctx, LcFunction *self, int argc, LcValue 
                 lc_lib_puts(ctx, &out, "://");
                 if (value.type == LC_STRING) lc_lib_append(ctx, &out, value.as.string->data, value.as.string->length);
             }
-            if (pv.type == LC_NUMBER) lc_lib_printf(ctx, &out, ":%d", (int)pv.as.number);
+            if (pv.type == LC_NUMBER || pv.type == LC_INTEGER) lc_lib_printf(ctx, &out, ":%d", (int)lc_to_integer(ctx, pv));
             lc_release(ctx, pv);
         } else if (value.type != LC_NIL) {
             if (i == 3) lc_lib_putc(ctx, &out, '?'); else if (i == 4) lc_lib_putc(ctx, &out, '#');
@@ -418,6 +418,7 @@ static int lc_json_encode_value(LcContext *ctx, LcLibBuffer *out, LcValue value,
     switch (value.type) {
         case LC_NIL: return lc_lib_puts(ctx, out, "null"); case LC_BOOL: return lc_lib_puts(ctx, out, value.as.boolean ? "true" : "false");
         case LC_NUMBER: if (!isfinite(value.as.number)) return lc_lib_puts(ctx, out, "null"); return lc_lib_printf(ctx, out, "%.17g", value.as.number);
+        case LC_INTEGER: return lc_lib_printf(ctx, out, "%" PRId64, value.as.integer);
         case LC_STRING: return lc_json_encode_string(ctx, out, value.as.string);
         case LC_TABLE: {
             int i, array = lc_table_length(value) == (int)value.as.table->length;
@@ -426,7 +427,7 @@ static int lc_json_encode_value(LcContext *ctx, LcLibBuffer *out, LcValue value,
                 LcEntry *entry = &value.as.table->entries[i];
                 if (!array) {
                     if (entry->key.type == LC_STRING) lc_json_encode_string(ctx, out, entry->key.as.string);
-                    else if (entry->key.type == LC_NUMBER) { LcValue key = lc_to_string(ctx, entry->key); lc_json_encode_string(ctx, out, key.as.string); lc_release(ctx, key); }
+                    else if (entry->key.type == LC_NUMBER || entry->key.type == LC_INTEGER) { LcValue key = lc_to_string(ctx, entry->key); lc_json_encode_string(ctx, out, key.as.string); lc_release(ctx, key); }
                     else { lc_error(ctx, "JSON object keys must be strings or numbers"); return 0; }
                     lc_lib_putc(ctx, out, ':');
                 }
@@ -957,7 +958,7 @@ static LcValue lc_vec_unary(LcContext *ctx,LcFunction *self,int argc,LcValue *ar
 
 /* ------------------------------- engine --------------------------------- */
 static LcValue lc_engine_get(LcContext *ctx,LcValue table,const char *name){LcValue key=lc_string(ctx,name),value=lc_table_raw_get(ctx,table,key);lc_release(ctx,key);return value;}
-static double lc_engine_number(LcContext *ctx,LcValue table,const char *name,double fallback){LcValue value=lc_engine_get(ctx,table,name);double result=value.type==LC_NUMBER?value.as.number:fallback;lc_release(ctx,value);return result;}
+static double lc_engine_number(LcContext *ctx,LcValue table,const char *name,double fallback){LcValue value=lc_engine_get(ctx,table,name);double result=value.type==LC_NUMBER?value.as.number:value.type==LC_INTEGER?(double)value.as.integer:fallback;lc_release(ctx,value);return result;}
 static void lc_engine_set_number(LcContext *ctx,LcValue table,const char *name,double number){lc_set_field(ctx,table,name,lc_number(number));}
 static int lc_engine_world(LcContext *ctx,LcValue value){value=lc_first_value(value);if(value.type!=LC_TABLE){lc_error(ctx,"engine world expected");return 0;}return 1;}
 static LcValue lc_engine_world_new(LcContext *ctx,LcFunction *self,int argc,LcValue *argv){LcValue world=lc_table(ctx),entities=lc_table(ctx),camera=lc_table(ctx);(void)self;(void)argc;(void)argv;lc_set_field(ctx,world,"entities",entities);lc_engine_set_number(ctx,world,"next_id",1);lc_engine_set_number(ctx,world,"time",0);lc_set_field(ctx,world,"running",lc_bool(1));lc_engine_set_number(ctx,camera,"x",0);lc_engine_set_number(ctx,camera,"y",0);lc_engine_set_number(ctx,camera,"zoom",1);lc_set_field(ctx,world,"camera",camera);return world;}
@@ -987,12 +988,14 @@ static LcValue lc_engine_tag(LcContext *ctx,LcFunction *self,int argc,LcValue *a
 static LcValue lc_engine_camera(LcContext *ctx,LcFunction *self,int argc,LcValue *argv){LcValue camera;(void)self;if(argc<1||!lc_engine_world(ctx,argv[0]))return lc_nil();camera=lc_engine_get(ctx,argv[0],"camera");if(argc>1)lc_engine_set_number(ctx,camera,"x",lc_lib_number_arg(ctx,argc,argv,1,0));if(argc>2)lc_engine_set_number(ctx,camera,"y",lc_lib_number_arg(ctx,argc,argv,2,0));if(argc>3)lc_engine_set_number(ctx,camera,"zoom",lc_lib_number_arg(ctx,argc,argv,3,1));return camera;}
 static LcValue lc_engine_project(LcContext *ctx,LcFunction *self,int argc,LcValue *argv){LcValue camera;double x,y,zoom,cx,cy;(void)self;if(argc<1||!lc_engine_world(ctx,argv[0]))return lc_nil();x=lc_lib_number_arg(ctx,argc,argv,1,0);y=lc_lib_number_arg(ctx,argc,argv,2,0);camera=lc_engine_get(ctx,argv[0],"camera");cx=lc_engine_number(ctx,camera,"x",0);cy=lc_engine_number(ctx,camera,"y",0);zoom=lc_engine_number(ctx,camera,"zoom",1);lc_release(ctx,camera);if(zoom==0)zoom=1;return !strcmp(lc_lib_name(self),"world_to_screen")?lc_vec_pair(ctx,(x-cx)*zoom,(y-cy)*zoom):lc_vec_pair(ctx,x/zoom+cx,y/zoom+cy);}
 
+#include "luac_ffi.h"
+
 /* --------------------------- library registration ----------------------- */
 static void lc_lib_register(LcContext *ctx,const char *name,LcValue table){
     LcValue package,loaded;lc_set_global(ctx,name,lc_retain(table));package=lc_engine_get(ctx,ctx->globals,"package");loaded=lc_engine_get(ctx,package,"loaded");lc_set_field(ctx,loaded,name,table);lc_release(ctx,loaded);lc_release(ctx,package);
 }
 static void lc_register_libraries(LcContext *ctx) {
-    LcValue text=lc_table(ctx),hex=lc_table(ctx),base64=lc_table(ctx),url=lc_table(ctx),json=lc_table(ctx),hash=lc_table(ctx),fs=lc_table(ctx),path=lc_table(ctx),clock=lc_table(ctx),vec=lc_table(ctx),net=lc_table(ctx),http=lc_table(ctx),engine=lc_table(ctx);
+    LcValue ffi=lc_table(ctx),text=lc_table(ctx),hex=lc_table(ctx),base64=lc_table(ctx),url=lc_table(ctx),json=lc_table(ctx),hash=lc_table(ctx),fs=lc_table(ctx),path=lc_table(ctx),clock=lc_table(ctx),vec=lc_table(ctx),net=lc_table(ctx),http=lc_table(ctx),engine=lc_table(ctx);
     const char *simple[]={"trim","ltrim","rtrim","reverse","capitalize","title","swapcase",NULL};
     const char *predicates[]={"startswith","endswith","contains","find","count",NULL};
     const char *binary_vec[]={"add","sub","mul","dot","cross","distance","distance2","lerp",NULL};
@@ -1019,6 +1022,9 @@ static void lc_register_libraries(LcContext *ctx) {
     lc_add_native(ctx,http,"request",lc_http_request);lc_add_native(ctx,http,"get",lc_http_get);lc_add_native(ctx,http,"post",lc_http_post);lc_add_native(ctx,http,"tls_available",lc_http_tls_available);lc_add_native(ctx,http,"setca",lc_http_setca);lc_add_native(ctx,http,"setverify",lc_http_setverify);lc_lib_register(ctx,"http",http);
     lc_add_native(ctx,engine,"world",lc_engine_world_new);lc_add_native(ctx,engine,"create",lc_engine_create);lc_add_native(ctx,engine,"entity",lc_engine_create);lc_add_native(ctx,engine,"find",lc_engine_find);lc_add_native(ctx,engine,"destroy",lc_engine_destroy);lc_add_native(ctx,engine,"list",lc_engine_list);lc_add_native(ctx,engine,"ids",lc_engine_list);lc_add_native(ctx,engine,"count",lc_engine_count);lc_add_native(ctx,engine,"clear",lc_engine_clear);lc_add_native(ctx,engine,"update",lc_engine_update);lc_add_native(ctx,engine,"pause",lc_engine_running);lc_add_native(ctx,engine,"resume",lc_engine_running);lc_add_native(ctx,engine,"intersects",lc_engine_intersects);lc_add_native(ctx,engine,"collisions",lc_engine_collisions);lc_add_native(ctx,engine,"bounds",lc_engine_bounds);lc_add_native(ctx,engine,"set_color",lc_engine_color);lc_add_native(ctx,engine,"add_component",lc_engine_component);lc_add_native(ctx,engine,"get_component",lc_engine_component);lc_add_native(ctx,engine,"remove_component",lc_engine_component);lc_add_native(ctx,engine,"add_tag",lc_engine_tag);lc_add_native(ctx,engine,"remove_tag",lc_engine_tag);lc_add_native(ctx,engine,"has_tag",lc_engine_tag);lc_add_native(ctx,engine,"camera",lc_engine_camera);lc_add_native(ctx,engine,"world_to_screen",lc_engine_project);lc_add_native(ctx,engine,"screen_to_world",lc_engine_project);
     {const char *mutations[]={"set_position","set_velocity","set_size","translate","set_rotation","rotate","set_scale","set_angular_velocity","set_active",NULL};for(i=0;mutations[i];++i)lc_add_native(ctx,engine,mutations[i],lc_engine_mutate);}lc_lib_register(ctx,"engine",engine);
+    { LcValue co_lib=lc_table(ctx);
+      lc_add_native(ctx,co_lib,"create",lc_builtin_coroutine_create);lc_add_native(ctx,co_lib,"resume",lc_builtin_coroutine_resume);lc_add_native(ctx,co_lib,"yield",lc_builtin_coroutine_yield);lc_add_native(ctx,co_lib,"wrap",lc_builtin_coroutine_wrap);lc_add_native(ctx,co_lib,"status",lc_builtin_coroutine_status);lc_add_native(ctx,co_lib,"running",lc_builtin_coroutine_running);lc_add_native(ctx,co_lib,"isyieldable",lc_builtin_coroutine_isyieldable);lc_lib_register(ctx,"coroutine",co_lib); }
+    lc_add_native(ctx,ffi,"open",lc_ffi_open);lc_add_native(ctx,ffi,"load",lc_ffi_open);lc_add_native(ctx,ffi,"close",lc_ffi_close);lc_add_native(ctx,ffi,"call",lc_ffi_call);lc_lib_register(ctx,"ffi",ffi);
     lc_audio_init(ctx);
 }
 #endif
