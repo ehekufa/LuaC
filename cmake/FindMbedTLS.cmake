@@ -1,4 +1,4 @@
-# Locate mbedTLS 3.x on Unix packages, vcpkg, MSYS2 and custom prefixes.
+# Locate mbedTLS 2.28+/3.x/4.x on Unix packages, vcpkg, MSYS2 and custom prefixes.
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
     pkg_check_modules(PC_MBEDTLS QUIET mbedtls)

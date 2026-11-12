@@ -5,7 +5,7 @@
    LUAC_WITH_MBEDTLS. Plain HTTP and all non-network libraries remain usable
    without this dependency. */
 #ifdef LUAC_WITH_MBEDTLS
-#include <mbedtls/build_info.h>
+#include <mbedtls/version.h>
 #if MBEDTLS_VERSION_NUMBER >= 0x04000000
 #include <psa/crypto.h>
 #else
@@ -174,16 +174,22 @@ failed:
 static int lc_tls_write(LcTls *tls, const char *data, size_t length) {
     int result;
     do result = mbedtls_ssl_write(&tls->ssl, (const unsigned char *)data, (int)(length > INT32_MAX ? INT32_MAX : length));
-    while (result == MBEDTLS_ERR_SSL_WANT_READ || result == MBEDTLS_ERR_SSL_WANT_WRITE ||
-           result == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET);
+    while (result == MBEDTLS_ERR_SSL_WANT_READ || result == MBEDTLS_ERR_SSL_WANT_WRITE
+#ifdef MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET
+           || result == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET
+#endif
+    );
     if (result < 0) lc_tls_message(tls, result, "TLS write");
     return result;
 }
 static int lc_tls_read(LcTls *tls, char *data, size_t length) {
     int result;
     do result = mbedtls_ssl_read(&tls->ssl, (unsigned char *)data, (int)(length > INT32_MAX ? INT32_MAX : length));
-    while (result == MBEDTLS_ERR_SSL_WANT_READ || result == MBEDTLS_ERR_SSL_WANT_WRITE ||
-           result == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET);
+    while (result == MBEDTLS_ERR_SSL_WANT_READ || result == MBEDTLS_ERR_SSL_WANT_WRITE
+#ifdef MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET
+           || result == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET
+#endif
+    );
     if (result == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) return 0;
     if (result < 0) { lc_tls_message(tls, result, "TLS read"); return -1; }
     return result;
@@ -197,10 +203,11 @@ static int lc_tls_start_server(LcContext *ctx, LcTls *tls, LcOsSocket *handle, c
     if (result != 0) { lc_tls_message(tls, result, "TLS random initialization"); goto failed; }
     result = mbedtls_x509_crt_parse_file(&tls->certificate, certificate);
     if (result != 0) { lc_tls_message(tls, result, "TLS server certificate"); goto failed; }
-#if MBEDTLS_VERSION_NUMBER >= 0x04000000
-    result = mbedtls_pk_parse_keyfile(&tls->private_key, private_key, NULL);
-#else
+#if MBEDTLS_VERSION_NUMBER >= 0x03000000 && MBEDTLS_VERSION_NUMBER < 0x04000000
     result = mbedtls_pk_parse_keyfile(&tls->private_key, private_key, NULL, mbedtls_ctr_drbg_random, &tls->random);
+#else
+    /* mbedTLS 2.28 and 4.x use the three-argument form. */
+    result = mbedtls_pk_parse_keyfile(&tls->private_key, private_key, NULL);
 #endif
     if (result != 0) { lc_tls_message(tls, result, "TLS server private key"); goto failed; }
     result = mbedtls_ssl_config_defaults(&tls->config, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
