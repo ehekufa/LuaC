@@ -14,7 +14,9 @@ print("WAV:", song:frames(), "frames,", song:duration(), "seconds")
 
 if audio.playback_available() then
     local ok, message = song:play()
-    if ok then song:wait() else print("No playback device:", message) end
+    if ok then
+        if not song:wait() then print("Playback device timed out") end
+    else print("No playback device:", message) end
 else
     print("Playback backend is disabled; WAV was still created")
 end

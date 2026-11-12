@@ -286,10 +286,14 @@ static LcValue lc_audio_stop(LcContext *ctx, LcFunction *self, int argc, LcValue
 static LcValue lc_audio_wait(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
     LcAudio *a = lc_audio_arg(ctx, argc, argv, 0); (void)self; if (!a) return lc_nil();
 #ifdef LUAC_WITH_MINIAUDIO
-    while (a->device && a->cursor < a->frames) ma_sleep(10);
-    lc_audio_dispose(a); if (a) a->cursor = 0;
-#endif
+    int remaining_ms = (int)((double)a->frames * 1000.0 / a->sample_rate) + 2000;
+    while (a->device && a->cursor < a->frames && remaining_ms > 0) { ma_sleep(10); remaining_ms -= 10; }
+    { int completed = a->cursor >= a->frames;
+      lc_audio_dispose(a); a->cursor = 0;
+      return lc_bool(completed); }
+#else
     return lc_bool(1);
+#endif
 }
 static LcValue lc_audio_playback_available(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
     (void)ctx; (void)self; (void)argc; (void)argv;

@@ -99,7 +99,7 @@ assert(body and status == 200)
 - metadata: `info`, `frames`, `channels`, `sample_rate`, `duration`;
 - sample access: `get(frame, channel=1)`, `set(frame, channel, sample)` (индексы с 1);
 - processing: `gain`, `fade`, `normalize`, `lowpass`, `highpass`, `delay`, `resample`;
-- playback: `play`, `wait`, `stop`, `playback_available()`;
+- playback: `play`, `wait`, `stop`, `playback_available()`; `wait` возвращает `false`, если device не завершил buffer за его duration + 2 секунды;
 - `save(path)` пишет PCM16 WAV, `save(path, "float")` — float32 WAV.
 
 `tone` options: `sample_rate`, `channels`, `amplitude`, `attack`, `release`, `pan`, `waveform` (`sine`, `square`, `saw`, `triangle`, `noise`). `load` читает RIFF/WAVE PCM 8/16/24/32-bit и float32. `mix` требует одинаковые sample rate/channel count и дополняет короткие buffers тишиной. Processing methods изменяют buffer и возвращают его для chaining; `resample` и `mix` создают новый buffer.
