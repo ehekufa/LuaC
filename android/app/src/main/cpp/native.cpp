@@ -23,7 +23,7 @@ Java_com_luac_studio_MainActivity_nativeCheck(JNIEnv *env, jclass, jstring sourc
     std::string code = fromJava(env, source);
     char *error = nullptr;
     int valid = luac_check(code.c_str(), "AndroidEditor.lua", &error);
-    std::string result = valid ? "Syntax OK\nNo tracing GC; native code generation is ready." : error;
+    std::string result = valid ? "Syntax OK\nNative C ready; runtime includes cycle GC and weak tables." : error;
     luac_free(error);
     return env->NewStringUTF(result.c_str());
 }
