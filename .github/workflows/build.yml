@@ -282,7 +282,7 @@ jobs:
         shell: bash
         run: |
           if ! gradle --no-daemon assembleDebug > android-build.log 2>&1; then
-            message=$(grep -E -C 3 'error:|error |e: |FAILURE|Exception|undefined reference|undefined symbol' android-build.log | tail -c 7000 | tr '\r\n' '  ' || true)
+            message=$(grep -E '(^|[ :])error:|undefined reference|undefined symbol|FAILURE:|^e:' android-build.log | tail -c 3000 | tr '\r\n' '  ' || true)
             echo "::error file=android/app/build.gradle::${message}"
             tail -100 android-build.log
             exit 1
