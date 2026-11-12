@@ -167,7 +167,11 @@ static int lc_tls_start_server(LcContext *ctx, LcTls *tls, LcOsSocket *handle, c
     if (result != 0) { lc_tls_message(tls, result, "TLS random initialization"); goto failed; }
     result = mbedtls_x509_crt_parse_file(&tls->certificate, certificate);
     if (result != 0) { lc_tls_message(tls, result, "TLS server certificate"); goto failed; }
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000
+    result = mbedtls_pk_parse_keyfile(&tls->private_key, private_key, NULL);
+#else
     result = mbedtls_pk_parse_keyfile(&tls->private_key, private_key, NULL, mbedtls_ctr_drbg_random, &tls->random);
+#endif
     if (result != 0) { lc_tls_message(tls, result, "TLS server private key"); goto failed; }
     result = mbedtls_ssl_config_defaults(&tls->config, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
     if (result != 0) { lc_tls_message(tls, result, "TLS server configuration"); goto failed; }
