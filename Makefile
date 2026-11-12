@@ -28,7 +28,7 @@ endif
 ifeq ($(MINIAUDIO),1)
   NATIVE_CFLAGS += -DLUAC_WITH_MINIAUDIO
   NATIVE_LDFLAGS += -pthread
-  ifneq ($(OS),Windows_NT)
+  ifeq ($(UNAME_S),Linux)
     NATIVE_LDFLAGS += -ldl
   endif
 endif

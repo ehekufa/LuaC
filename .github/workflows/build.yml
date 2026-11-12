@@ -142,7 +142,21 @@ jobs:
       - run: brew install mbedtls pkg-config
       - run: make -j2 MBEDTLS=1 MINIAUDIO=1 all
       - run: make -j2 MBEDTLS=1 MINIAUDIO=1 libraries
-      - run: ./luac examples/https.lua && ./luac tests/audio.lua
+      - name: HTTPS and audio smoke
+        run: |
+          set +e
+          ./luac examples/https.lua > https-smoke.log 2>&1
+          https_status=$?
+          ./luac tests/audio.lua > audio-smoke.log 2>&1
+          audio_status=$?
+          set -e
+          cat https-smoke.log audio-smoke.log
+          if [ "$https_status" -ne 0 ] || [ "$audio_status" -ne 0 ]; then
+            https_message=$(tail -c 3000 https-smoke.log | tr '\r\n' '  ')
+            audio_message=$(tail -c 3000 audio-smoke.log | tr '\r\n' '  ')
+            printf '::error file=examples/https.lua::HTTPS status %s: %s; audio status %s: %s\n' "$https_status" "$https_message" "$audio_status" "$audio_message"
+            exit 1
+          fi
       - name: Package universal sources and native arm64 build
         run: |
           mkdir -p dist/macos
