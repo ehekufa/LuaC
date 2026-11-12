@@ -96,7 +96,7 @@ final class ProjectStore {
         ArrayList<File> result = new ArrayList<>();
         File[] files = directory.listFiles();
         if (files != null) result.addAll(Arrays.asList(files));
-        result.sort(Comparator.comparing(File::isFile).thenComparing(file -> file.getName().toLowerCase()));
+        result.sort(Comparator.comparing(File::isFile).thenComparing((File file) -> file.getName().toLowerCase()));
         return result;
     }
 
