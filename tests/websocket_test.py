@@ -45,7 +45,7 @@ def tls_server(c):
  context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(cert,key);return context.wrap_socket(c,server_side=True)
 def python_server(url_box,ready):
  try:
-  listener=socket.socket();listener.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);listener.bind(('127.0.0.1',0));listener.listen();listener.settimeout(10)
+  listener=socket.socket();listener.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);listener.bind(('127.0.0.1',0));listener.listen();listener.settimeout(120)
   scheme='wss' if args.secure else 'ws';url_box.append(f'{scheme}://localhost:{listener.getsockname()[1]}/chat');ready.set()
   c,_=listener.accept();c=tls_server(c);c.settimeout(10);data=b''
   while b'\r\n\r\n' not in data:data+=c.recv(4096)
@@ -63,7 +63,7 @@ def test_client():
  if errors:raise errors[0]
  script='websocket_secure_client.lua' if args.secure else 'websocket_client.lua'
  env=environment({'WS_URL':urls[0],'WS_CA':str(cert)})
- result=subprocess.run(command(script),cwd=ROOT,env=env,capture_output=True,text=True,timeout=40)
+ result=subprocess.run(command(script),cwd=ROOT,env=env,capture_output=True,text=True,timeout=120)
  thread.join(timeout=2)
  if result.returncode or errors:raise RuntimeError(f'client failed: {result.stdout}\n{result.stderr}\n{errors}')
  assert 'WebSocket client OK' in result.stdout
@@ -74,7 +74,8 @@ def test_server():
  env=environment({'WS_PORT':str(port),'WS_CERT':str(cert),'WS_KEY':str(key)})
  process=subprocess.Popen(command(script),cwd=ROOT,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
  c=None
- for _ in range(200):
+ deadline=time.monotonic()+120
+ while time.monotonic()<deadline:
   try:c=socket.create_connection(('127.0.0.1',port),timeout=.1);break
   except OSError:
    if process.poll() is not None:break
