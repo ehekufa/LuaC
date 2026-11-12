@@ -18,7 +18,11 @@
 #include <ctype.h>
 #include <inttypes.h>
 #ifndef _WIN32
+#ifdef __ANDROID__
+#include <pthread.h>
+#else
 #include <ucontext.h>
+#endif
 #endif
 #include <errno.h>
 #include <math.h>
@@ -105,10 +109,16 @@ struct LcCoroutine {
     void *stack;
     size_t stack_size;
     int state, started;
-#ifndef _WIN32
-    ucontext_t context, caller;
-#else
+#ifdef _WIN32
     void *fiber, *caller_fiber;
+#elif defined(__ANDROID__)
+    LcContext *owner;
+    pthread_t thread;
+    pthread_mutex_t mutex;
+    pthread_cond_t condition;
+    int thread_created, turn, cancel;
+#else
+    ucontext_t context, caller;
 #endif
 };
 
@@ -221,6 +231,9 @@ static void lc_error(LcContext *ctx, const char *fmt, ...) {
 }
 
 static void lc_gc_collect(LcContext *ctx);
+#ifdef __ANDROID__
+static void lc_android_coroutine_dispose(LcCoroutine *coroutine);
+#endif
 static void lc_ffi_dispose(LcFFILibrary *library);
 static void lc_websocket_dispose(LcWebsocket *websocket);
 static int lc_websocket_is_closed(LcWebsocket *websocket);
@@ -330,6 +343,8 @@ static void lc_free_value(LcContext *ctx, LcValue v) {
             lc_release(ctx, v.as.coroutine->result);
 #ifdef _WIN32
             if (v.as.coroutine->fiber) DeleteFiber(v.as.coroutine->fiber);
+#elif defined(__ANDROID__)
+            lc_android_coroutine_dispose(v.as.coroutine);
 #else
             free(v.as.coroutine->stack);
 #endif
@@ -956,8 +971,11 @@ static LcValue lc_unary(LcContext *ctx, int op, LcValue a) {
 }
 
 /* Stackful coroutines preserve generated C locals and closure frames. Unix
-   uses ucontext; Windows uses native Fibers. No source Lua VM is involved. */
-#ifndef _WIN32
+   uses ucontext, Windows native Fibers, and Android a synchronized pthread
+   backend because Bionic provides ucontext_t but no context-switch APIs. */
+#ifdef __ANDROID__
+static void *lc_coroutine_entry(void *parameter);
+#elif !defined(_WIN32)
 static LcContext *lc_coroutine_boot_context;
 static void lc_coroutine_entry(void);
 #else
@@ -973,7 +991,23 @@ static LcValue lc_coroutine_new(LcContext *ctx, LcValue function) {
     co = (LcCoroutine *)lc_alloc(ctx, sizeof(*co), LC_COROUTINE);
     if (!co) return lc_nil();
     co->function = lc_retain(lc_first_value(function)); co->stack_size = 1024 * 1024;
-#ifndef _WIN32
+#ifdef __ANDROID__
+    co->owner = ctx;
+    pthread_mutex_init(&co->mutex, NULL);
+    pthread_cond_init(&co->condition, NULL);
+    {
+        pthread_attr_t attributes;
+        pthread_attr_init(&attributes);
+        pthread_attr_setstacksize(&attributes, co->stack_size);
+        if (pthread_create(&co->thread, &attributes, lc_coroutine_entry, co) != 0) {
+            pthread_attr_destroy(&attributes);
+            pthread_cond_destroy(&co->condition); pthread_mutex_destroy(&co->mutex);
+            lc_release(ctx, lc_coroutine_value(co)); lc_error(ctx, "cannot create coroutine thread"); return lc_nil();
+        }
+        pthread_attr_destroy(&attributes);
+        co->thread_created = 1;
+    }
+#elif !defined(_WIN32)
     co->stack = malloc(co->stack_size);
     if (!co->stack) { lc_release(ctx, lc_coroutine_value(co)); lc_error(ctx, "out of memory creating coroutine stack"); return lc_nil(); }
     if (getcontext(&co->context) != 0) { free(co->stack); co->stack = NULL; lc_release(ctx, lc_coroutine_value(co)); lc_error(ctx, "cannot create coroutine context"); return lc_nil(); }
@@ -1004,7 +1038,13 @@ static LcValue lc_coroutine_resume_value(LcContext *ctx, LcCoroutine *co, int ar
     lc_release(ctx, co->resume_args); co->resume_args = lc_tuple_new(ctx, argc, argv, 0);
     lc_release(ctx, co->yielded); co->yielded = lc_nil(); lc_release(ctx, co->result); co->result = lc_nil();
     co->state = 1; ctx->active_coroutine = co;
-#ifndef _WIN32
+#ifdef __ANDROID__
+    pthread_mutex_lock(&co->mutex);
+    co->turn = 1;
+    pthread_cond_broadcast(&co->condition);
+    while (co->turn) pthread_cond_wait(&co->condition, &co->mutex);
+    pthread_mutex_unlock(&co->mutex);
+#elif !defined(_WIN32)
     lc_coroutine_boot_context = ctx;
     if (swapcontext(&co->caller, &co->context) != 0) {
         ctx->active_coroutine = parent; co->state = 3;
@@ -1038,14 +1078,58 @@ static LcValue lc_builtin_coroutine_yield(LcContext *ctx, LcFunction *self, int 
     if (!co) { lc_error(ctx, "attempt to yield from outside a coroutine"); return lc_nil(); }
     lc_release(ctx, co->yielded); co->yielded = lc_tuple_new(ctx, argc, argv, 0);
     lc_release(ctx, co->resume_args); co->resume_args = lc_nil(); co->state = 0;
-#ifndef _WIN32
+#ifdef __ANDROID__
+    pthread_mutex_lock(&co->mutex);
+    co->turn = 0;
+    pthread_cond_broadcast(&co->condition);
+    while (!co->turn && !co->cancel) pthread_cond_wait(&co->condition, &co->mutex);
+    if (co->cancel) {
+        co->turn = 0;
+        pthread_cond_broadcast(&co->condition);
+        pthread_mutex_unlock(&co->mutex);
+        pthread_exit(NULL);
+    }
+    pthread_mutex_unlock(&co->mutex);
+#elif !defined(_WIN32)
     if (swapcontext(&co->context, &co->caller) != 0) { lc_error(ctx, "coroutine yield failed"); return lc_nil(); }
 #else
     SwitchToFiber(co->caller_fiber);
 #endif
     result = lc_retain(co->resume_args); lc_release(ctx, co->resume_args); co->resume_args = lc_nil(); return result;
 }
-#ifndef _WIN32
+#ifdef __ANDROID__
+static void lc_android_coroutine_dispose(LcCoroutine *co) {
+    if (!co->thread_created) return;
+    pthread_mutex_lock(&co->mutex);
+    co->cancel = 1; co->turn = 1;
+    pthread_cond_broadcast(&co->condition);
+    pthread_mutex_unlock(&co->mutex);
+    pthread_join(co->thread, NULL);
+    co->thread_created = 0;
+    pthread_cond_destroy(&co->condition); pthread_mutex_destroy(&co->mutex);
+}
+static void *lc_coroutine_entry(void *parameter) {
+    LcCoroutine *co = (LcCoroutine *)parameter;
+    LcContext *ctx = co->owner;
+    int argc;
+    LcValue *argv;
+    pthread_mutex_lock(&co->mutex);
+    while (!co->turn && !co->cancel) pthread_cond_wait(&co->condition, &co->mutex);
+    if (co->cancel) {
+        co->turn = 0; pthread_cond_broadcast(&co->condition);
+        pthread_mutex_unlock(&co->mutex); return NULL;
+    }
+    pthread_mutex_unlock(&co->mutex);
+    argc = co->resume_args.type == LC_TUPLE ? co->resume_args.as.tuple->count : 0;
+    argv = argc ? co->resume_args.as.tuple->items : NULL;
+    co->started = 1; lc_release(ctx, co->result); co->result = lc_call_list(ctx, co->function, argc, argv);
+    lc_release(ctx, co->resume_args); co->resume_args = lc_nil(); co->state = ctx->error ? 3 : 2;
+    pthread_mutex_lock(&co->mutex);
+    co->turn = 0; pthread_cond_broadcast(&co->condition);
+    pthread_mutex_unlock(&co->mutex);
+    return NULL;
+}
+#elif !defined(_WIN32)
 static void lc_coroutine_entry(void) {
     LcContext *ctx = lc_coroutine_boot_context; LcCoroutine *co = ctx->active_coroutine;
     int argc = co->resume_args.type == LC_TUPLE ? co->resume_args.as.tuple->count : 0;
@@ -2884,6 +2968,8 @@ static void lc_context_destroy(LcContext *ctx) {
         else if (o->kind == LC_COROUTINE) {
 #ifdef _WIN32
             if (((LcCoroutine *)o)->fiber) DeleteFiber(((LcCoroutine *)o)->fiber);
+#elif defined(__ANDROID__)
+            lc_android_coroutine_dispose((LcCoroutine *)o);
 #else
             free(((LcCoroutine *)o)->stack);
 #endif
