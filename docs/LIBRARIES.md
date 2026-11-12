@@ -158,7 +158,9 @@ Playback включается `LUAC_WITH_MINIAUDIO` и использует defa
 
 - world: `world`, `clear`, `count`, `list`, `ids`, `find`, `destroy`;
 - entities: `create`/`entity`, `set_position`, `set_velocity`, `set_size`, `translate`, `set_rotation`, `rotate`, `set_scale`, `set_angular_velocity`, `set_active`, `set_color`;
-- simulation: `update`, `pause`, `resume`, `bounds`, `intersects`, `collisions`;
+- simulation: `update`, `pause`, `resume`, `set_gravity`, `set_body`, `bounds`, `intersects`, `collisions`;
+- rendering data: `load_texture` (PNG/JPEG → RGBA), `set_sprite`, UTF-8 `text`, `clear_text`;
+- input: `inject_key`, `inject_mouse`, `inject_touch`, `clear_input` и query functions `is_key_down`, `is_key_pressed`, `mouse_pos`, `is_mouse_down`, `is_mouse_clicked`, `touch_pos`;
 - data: `add_component`, `get_component`, `remove_component`, `add_tag`, `remove_tag`, `has_tag`;
 - camera: `camera`, `world_to_screen`, `screen_to_world`.
 
@@ -166,6 +168,11 @@ Playback включается `LUAC_WITH_MINIAUDIO` и использует defa
 local world = engine.world()
 local player = engine.create(world, "Player", 0, 0)
 engine.set_velocity(player, 20, 0)
+engine.set_body(player, { restitution = 0.4, friction = 0.8 })
+engine.set_gravity(world, 0, 900)
+local texture = assert(engine.load_texture("assets/player.png"))
+engine.set_sprite(player, texture, 44, 44)
+engine.text(world, "Привет, мир", 20, 30, 24)
 engine.add_component(player, "health", 100)
 engine.add_tag(player, "player")
 engine.update(world, 1 / 60)
@@ -189,4 +196,8 @@ player.body.velocity = {20, 0};
 world.advance(1.0 / 60.0); // deterministic fixed steps
 ```
 
-`World` включает stable entity IDs, transforms, bodies, sprites, tags, numeric components, camera, AABB collisions, play/pause/step и bounded fixed-step catch-up. Это расширяемый native 2D core; physics solver, asset importer и networking для игровых объектов не выдаются за уже готовые подсистемы.
+`set_body` принимает `gravity_scale`, `gravity_x`, `gravity_y`, `restitution`, `friction`, `damping`, `kinematic`, `solid` и `grounded`; вызов включает `solid` по умолчанию, а `{solid=false}` оставляет только collision queries.
+
+`World` включает stable entity IDs, transforms, bodies, sprites, tags, numeric components, camera, AABB collisions, gravity/damping, restitution/friction, grounded state, play/pause/step и bounded fixed-step catch-up. `InputState` хранит keyboard/mouse/wheel/touch transitions, а `overlayText` — экранный UTF-8 text.
+
+`set_body` включает opt-in solid response; без него сохраняется legacy linear movement и collision queries. Physics — deterministic sequential AABB solver для небольших 2D worlds, без rotation-aware contacts и полноценного rigid-body dynamics. `load_texture` декодирует PNG/JPEG и возвращает `{width, height, channels, pixels}`; decoded bytes не привязаны к GPU context. Studio загружает sprite textures в Vulkan, использует embedded IBM Plex Mono glyph atlas для Unicode UI/scene text и передаёт GLFW keyboard/mouse/wheel в native `InputState`. Touch injection доступен через Lua API; отдельный mobile callback layer остаётся platform integration.

@@ -14,6 +14,8 @@ public:
     void render(const std::vector<LcVertex> &vertices, const std::vector<LcDraw> &draws,
                 int pixelWidth, int pixelHeight);
     void shutdown();
+    uint32_t loadTexture(const std::string &path);
+    void updateTexture(uint32_t id, int width, int height, const unsigned char *rgba);
 
 private:
     GLFWwindow *window_ = nullptr;
@@ -42,6 +44,15 @@ private:
     VkSemaphore presentSemaphore_ = VK_NULL_HANDLE;
     VkFence fence_ = VK_NULL_HANDLE;
     std::string shaders_;
+    struct Texture { VkImage image = VK_NULL_HANDLE; VkDeviceMemory memory = VK_NULL_HANDLE; VkImageView view = VK_NULL_HANDLE; VkSampler sampler = VK_NULL_HANDLE; VkDescriptorSet set = VK_NULL_HANDLE; };
+    std::vector<Texture> textures_;
+    VkDescriptorSetLayout descriptorLayout_ = VK_NULL_HANDLE;
+    VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
+    void createDescriptorLayout();
+    void createDefaultTextures();
+    uint32_t memoryType(uint32_t bits, VkMemoryPropertyFlags properties) const;
+    void uploadTexture(Texture &texture, int width, int height, const unsigned char *rgba);
+    void destroyTexture(Texture &texture);
 
     void createInstance();
     void selectDevice();

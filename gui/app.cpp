@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 #ifdef _WIN32
 #define popen _popen
@@ -44,23 +45,28 @@ struct App {
     bool controlDown = false;
     bool engineMode = false;
     luac::engine::World world;
+    std::unordered_map<std::string, uint32_t> textureIds;
+    std::unordered_set<std::string> textureFailures;
     luac::engine::World initialWorld;
     luac::engine::EntityId selectedEntity = luac::engine::invalidEntity;
 
     void initializeEngine() {
         auto &player = world.create("Player", {-140, 0});
         player.body.velocity = {55, 20};
+        player.body.solid = true;
         player.sprite.size = {44, 44};
         player.sprite.r = 0.20; player.sprite.g = 0.85; player.sprite.b = 0.65;
         player.tags.insert("player");
         player.components["health"] = 100;
         auto &crate = world.create("Crate", {30, 25});
         crate.body.kinematic = true;
+        crate.body.solid = true;
         crate.sprite.size = {64, 64};
         crate.sprite.r = 0.85; crate.sprite.g = 0.55; crate.sprite.b = 0.25;
         crate.tags.insert("obstacle");
         auto &orb = world.create("Orb", {150, -75});
         orb.body.velocity = {-25, 30};
+        orb.body.solid = true;
         orb.body.angularVelocity = 1.5;
         orb.sprite.size = {30, 30};
         orb.sprite.r = 0.55; orb.sprite.g = 0.40; orb.sprite.b = 1.0;
@@ -104,8 +110,9 @@ struct App {
         outputStorage.resize(outputCapacity);
         std::memset(&font, 0, sizeof(font));
         font.height = 16.0f;
-        font.width = [](nk_handle, float height, const char *text, int length) {
-            return NuklearCanvas::textWidth(height, text, length);
+        font.userdata = nk_handle_ptr(&canvas);
+        font.width = [](nk_handle handle, float height, const char *text, int length) {
+            return static_cast<NuklearCanvas *>(handle.ptr)->textWidth(height, text, length);
         };
         if (!nk_init_fixed(&ui, uiMemory.data(), uiMemory.size(), &font))
             throw std::runtime_error("Nuklear fixed arena initialization failed");
@@ -330,12 +337,42 @@ struct App {
                 struct nk_rect rectangle = nk_rect(ex - ew / 2, ey - eh / 2, ew, eh);
                 nk_color color = nk_rgba(static_cast<int>(entity.sprite.r * 255), static_cast<int>(entity.sprite.g * 255),
                                          static_cast<int>(entity.sprite.b * 255), static_cast<int>(entity.sprite.a * 255));
-                nk_fill_rect(commands, rectangle, 4, color);
+                if (!entity.sprite.texture.empty()) {
+                    try {
+                        auto found = textureIds.find(entity.sprite.texture);
+                        if (found == textureIds.end() && !textureFailures.count(entity.sprite.texture))
+                            found = textureIds.emplace(entity.sprite.texture, renderer.loadTexture(entity.sprite.texture)).first;
+                        if (found == textureIds.end()) {
+                            nk_fill_rect(commands, rectangle, 4, color);
+                        } else {
+                            auto coordinate = [](double value) {
+                                return static_cast<nk_ushort>(std::max(0.0, std::min(1.0, value)) * 65535.0);
+                            };
+                            struct nk_image image{};
+                            image.handle = nk_handle_id(static_cast<int>(found->second));
+                            image.w = image.h = 65535;
+                            image.region[0] = coordinate(entity.sprite.u0);
+                            image.region[1] = coordinate(entity.sprite.v0);
+                            nk_ushort u1 = coordinate(entity.sprite.u1), v1 = coordinate(entity.sprite.v1);
+                            image.region[2] = u1 >= image.region[0] ? static_cast<nk_ushort>(u1 - image.region[0]) : 0;
+                            image.region[3] = v1 >= image.region[1] ? static_cast<nk_ushort>(v1 - image.region[1]) : 0;
+                            nk_draw_image(commands, rectangle, &image, color);
+                        }
+                    } catch (const std::exception &) {
+                        textureFailures.insert(entity.sprite.texture);
+                        nk_fill_rect(commands, rectangle, 4, color);
+                    }
+                } else nk_fill_rect(commands, rectangle, 4, color);
                 if (entity.id == selectedEntity) nk_stroke_rect(commands, nk_rect(rectangle.x - 3, rectangle.y - 3,
                     rectangle.w + 6, rectangle.h + 6), 5, 2, nk_rgb(240, 240, 210));
                 nk_draw_text(commands, nk_rect(rectangle.x, rectangle.y + rectangle.h + 4, 140, 18), entity.name.c_str(),
                              static_cast<int>(entity.name.size()), &font, nk_rgb(0, 0, 0), nk_rgb(205, 220, 235));
                 if (nk_input_is_mouse_click_in_rect(&ui.input, NK_BUTTON_LEFT, rectangle)) selectedEntity = entity.id;
+            }
+            for (const auto &text : world.overlayText) {
+                nk_draw_text(commands, nk_rect(bounds.x + text.position.x, bounds.y + text.position.y,
+                    std::max(20.0, text.text.size() * text.size), text.size), text.text.c_str(), static_cast<int>(text.text.size()),
+                    &font, nk_rgba(0,0,0,0), nk_rgba(static_cast<int>(text.r*255),static_cast<int>(text.g*255),static_cast<int>(text.b*255),static_cast<int>(text.a*255)));
             }
             nk_layout_space_end(&ui);
         }
@@ -365,6 +402,10 @@ struct App {
                 nk_property_double(&ui, "Green", 0, &entity->sprite.g, 1, 0.01, 0.01);
                 nk_property_double(&ui, "Blue", 0, &entity->sprite.b, 1, 0.01, 0.01);
                 nk_property_double(&ui, "Alpha", 0, &entity->sprite.a, 1, 0.01, 0.01);
+                nk_layout_row_dynamic(&ui, 22, 1);
+                nk_label(&ui, "Texture (PNG/JPG path)", NK_TEXT_LEFT);
+                { char path[512]; std::snprintf(path, sizeof(path), "%s", entity->sprite.texture.c_str()); int length = static_cast<int>(std::strlen(path));
+                  nk_edit_string(&ui, NK_EDIT_SIMPLE, path, &length, sizeof(path)-1, nk_filter_default); path[length] = 0; entity->sprite.texture = path; }
                 nk_layout_row_dynamic(&ui, 26, 1);
                 nk_bool active = entity->active, kinematic = entity->body.kinematic;
                 if (nk_checkbox_label(&ui, "Active", &active)) entity->active = active;
@@ -420,6 +461,10 @@ struct App {
         }
         footer();
         canvas.render(ui, width, height);
+        if (canvas.atlas().dirty()) {
+            renderer.updateTexture(1, LcTextAtlas::size, LcTextAtlas::size, canvas.atlas().pixels().data());
+            canvas.atlas().clearDirty();
+        }
         renderer.render(canvas.vertices, canvas.draws, width, height);
         nk_clear(&ui);
     }
@@ -442,6 +487,7 @@ void characters(GLFWwindow *window, unsigned int codepoint) {
 void key(GLFWwindow *window, int keyCode, int, int action, int mods) {
     App *a = app(window);
     bool down = action != GLFW_RELEASE;
+    a->world.input.setKey(keyCode, down);
     if (keyCode == GLFW_KEY_LEFT_CONTROL || keyCode == GLFW_KEY_RIGHT_CONTROL) {
         a->controlDown = down; nk_input_key(&a->ui, NK_KEY_CTRL, down); return;
     }
@@ -490,11 +536,13 @@ void mouseButton(GLFWwindow *window, int button, int action, int) {
     else if (button == GLFW_MOUSE_BUTTON_RIGHT) mapped = NK_BUTTON_RIGHT;
     else return;
     App *a = app(window);
+    a->world.input.setMouseButton(button, action != GLFW_RELEASE);
     nk_input_button(&a->ui, mapped, static_cast<int>(a->mouseX), static_cast<int>(a->mouseY),
                     action != GLFW_RELEASE);
 }
-void mouseMove(GLFWwindow *window, double x, double y) { app(window)->pointer(x, y); }
+void mouseMove(GLFWwindow *window, double x, double y) { App *a=app(window); a->pointer(x,y); a->world.input.setMousePosition({a->mouseX,a->mouseY}); }
 void scroll(GLFWwindow *window, double x, double y) {
+    app(window)->world.input.setWheel({x,y});
     nk_input_scroll(&app(window)->ui, nk_vec2(static_cast<float>(x), static_cast<float>(y)));
 }
 }
@@ -524,11 +572,12 @@ int main(int argc, char **argv) {
         double previousTime = glfwGetTime();
         while (!glfwWindowShouldClose(window)) {
             double currentTime = glfwGetTime();
-            if (application.engineMode) application.world.advance(currentTime - previousTime);
-            previousTime = currentTime;
+            application.world.input.beginFrame();
             nk_input_begin(&application.ui);
             glfwPollEvents();
             nk_input_end(&application.ui);
+            if (application.engineMode) application.world.advance(currentTime - previousTime);
+            previousTime = currentTime;
             glfwGetFramebufferSize(window, &application.width, &application.height);
             if (application.width > 0 && application.height > 0) application.draw();
             else { nk_clear(&application.ui); glfwWaitEvents(); }

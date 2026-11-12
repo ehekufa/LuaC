@@ -5,8 +5,8 @@
 #include <vector>
 
 namespace {
-float width(nk_handle, float height, const char *text, int length) {
-    return NuklearCanvas::textWidth(height, text, length);
+float width(nk_handle handle, float height, const char *text, int length) {
+    return static_cast<NuklearCanvas *>(handle.ptr)->textWidth(height, text, length);
 }
 
 bool frame(nk_context &ui, NuklearCanvas &canvas, bool &clicked, char *source, int &sourceLength, struct nk_rect &buttonBounds) {
@@ -16,6 +16,11 @@ bool frame(nk_context &ui, NuklearCanvas &canvas, bool &clicked, char *source, i
         clicked = nk_button_label(&ui, "Run") != 0;
         nk_layout_row_dynamic(&ui, 180, 1);
         nk_edit_string(&ui, NK_EDIT_BOX, source, &sourceLength, 1024, nk_filter_default);
+        struct nk_image image{};
+        image.handle = nk_handle_id(7); image.w = image.h = 100;
+        image.region[0] = 10; image.region[1] = 20;
+        image.region[2] = 30; image.region[3] = 40;
+        nk_draw_image(nk_window_get_canvas(&ui), nk_rect(350, 20, 50, 60), &image, nk_rgb(255, 255, 255));
     }
     nk_end(&ui);
     canvas.render(ui, 480, 320);
@@ -39,15 +44,26 @@ int main() {
     nk_context ui{};
     nk_user_font font{};
     font.height = 16;
+    NuklearCanvas canvas;
+    font.userdata = nk_handle_ptr(&canvas);
     font.width = width;
     assert(nk_init_fixed(&ui, arena.data(), arena.size(), &font));
-    NuklearCanvas canvas;
     char source[1024] = "print('Nuklear')";
     int sourceLength = static_cast<int>(std::strlen(source));
     bool clicked = false;
     struct nk_rect buttonBounds{};
     frame(ui, canvas, clicked, source, sourceLength, buttonBounds);
     assert(!clicked);
+    bool imageDraw = false;
+    for (const auto &draw : canvas.draws) if (draw.texture == 7) {
+        imageDraw = true;
+        assert(draw.count == 6);
+        assert(std::abs(canvas.vertices[draw.first].u - 0.1f) < 1e-6f);
+        assert(std::abs(canvas.vertices[draw.first].v - 0.2f) < 1e-6f);
+        assert(std::abs(canvas.vertices[draw.first + 4].u - 0.4f) < 1e-6f);
+        assert(std::abs(canvas.vertices[draw.first + 4].v - 0.6f) < 1e-6f);
+    }
+    assert(imageDraw);
 
     /* Feed a complete click through Nuklear's public input API. */
     nk_input_begin(&ui);
@@ -79,6 +95,15 @@ int main() {
     assert(sourceLength == 17);
     assert(std::strstr(source, "!") != nullptr);
     assert(ui.memory.allocated <= arena.size());
+    LcTextAtlas atlas;
+    assert(atlas.valid());
+    assert(atlas.glyph(0x041f, 18).advance > 0); /* Cyrillic П */
+    assert(atlas.glyph(0x044f, 18).u1 > atlas.glyph(0x044f, 18).u0); /* я */
+    assert(atlas.glyph(0x4e2d, 18).advance >= 0); /* fallback/CJK path */
+    std::snprintf(source, sizeof(source), "print('Привет, мир')"); sourceLength = static_cast<int>(std::strlen(source));
+    frame(ui, canvas, clicked, source, sourceLength, buttonBounds);
+    bool atlasDraw = false; for (const auto &draw : canvas.draws) if (draw.texture == 1) atlasDraw = true;
+    assert(atlasDraw);
     nk_free(&ui);
     std::cout << "Nuklear fixed-arena input, editing and Vulkan geometry: OK\n";
 }

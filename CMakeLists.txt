@@ -197,6 +197,12 @@ if(BUILD_TESTING)
                 PASS_REGULAR_EXPRESSION "WebSocket independent server: OK"
             )
         endif()
+        add_test(NAME luac-game-jit COMMAND luac_compiler
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/game.lua")
+        set_tests_properties(luac-game-jit PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            PASS_REGULAR_EXPRESSION "LuaC game assets physics input: OK"
+        )
         add_test(NAME luac-audio-jit COMMAND luac_compiler
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/audio.lua")
         set_tests_properties(luac-audio-jit PROPERTIES
@@ -271,9 +277,9 @@ install(EXPORT LuaCTargets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LuaC
 )
 install(FILES src/luac.h src/engine.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_tls.h src/luac_audio.h
+install(FILES src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_tls.h src/luac_audio.h
+install(FILES src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h
     DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)
 install(DIRECTORY src/third_party DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY src/third_party DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)

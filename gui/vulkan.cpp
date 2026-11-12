@@ -4,6 +4,10 @@
 #include <fstream>
 #include <stdexcept>
 #include <vector>
+#define STBI_ONLY_PNG
+#define STBI_ONLY_JPEG
+#define STB_IMAGE_IMPLEMENTATION
+#include "../src/third_party/stb_image.h"
 
 namespace {
 void vk(bool ok, const char *message) {
@@ -186,7 +190,10 @@ void VulkanRenderer::createRenderPassAndPipeline() {
     render.pDependencies = &dependency;
     vk(vkCreateRenderPass(device_, &render, nullptr, &renderPass_), "Vulkan render pass creation failed");
     VkPushConstantRange push{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 2};
+    createDescriptorLayout();
     VkPipelineLayoutCreateInfo layout{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    layout.setLayoutCount = 1;
+    layout.pSetLayouts = &descriptorLayout_;
     layout.pushConstantRangeCount = 1;
     layout.pPushConstantRanges = &push;
     vk(vkCreatePipelineLayout(device_, &layout, nullptr, &pipelineLayout_), "Vulkan pipeline layout failed");
@@ -204,13 +211,14 @@ void VulkanRenderer::createRenderPassAndPipeline() {
     stages[1].module = frag;
     stages[1].pName = "main";
     VkVertexInputBindingDescription binding{0, sizeof(LcVertex), VK_VERTEX_INPUT_RATE_VERTEX};
-    VkVertexInputAttributeDescription attributes[2]{};
+    VkVertexInputAttributeDescription attributes[3]{};
     attributes[0] = {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(LcVertex, x)};
     attributes[1] = {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(LcVertex, r)};
     VkPipelineVertexInputStateCreateInfo input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
     input.vertexBindingDescriptionCount = 1;
     input.pVertexBindingDescriptions = &binding;
-    input.vertexAttributeDescriptionCount = 2;
+    input.vertexAttributeDescriptionCount = 3;
+    attributes[2] = {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(LcVertex, u)};
     input.pVertexAttributeDescriptions = attributes;
     VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
     assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -323,6 +331,7 @@ void VulkanRenderer::initialize(GLFWwindow *window, const std::string &shaderDir
     createSwapchain();
     createRenderPassAndPipeline();
     createFrameResources();
+    createDefaultTextures();
 }
 
 void VulkanRenderer::destroySwapchain() {
@@ -392,6 +401,8 @@ void VulkanRenderer::render(const std::vector<LcVertex> &vertices, const std::ve
         if (static_cast<uint32_t>(x) >= right || static_cast<uint32_t>(y) >= bottom) continue;
         VkRect2D clip{{x, y}, {right - static_cast<uint32_t>(x), bottom - static_cast<uint32_t>(y)}};
         vkCmdSetScissor(commandBuffer_, 0, 1, &clip);
+        uint32_t texture = draw.texture < textures_.size() ? draw.texture : 0;
+        vkCmdBindDescriptorSets(commandBuffer_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &textures_[texture].set, 0, nullptr);
         vkCmdDraw(commandBuffer_, draw.count, 1, draw.first, 0);
     }
     vkCmdEndRenderPass(commandBuffer_);
@@ -416,8 +427,85 @@ void VulkanRenderer::render(const std::vector<LcVertex> &vertices, const std::ve
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) recreateSwapchain();
 }
 
+void VulkanRenderer::createDescriptorLayout() {
+    VkDescriptorSetLayoutBinding binding{};
+    binding.binding = 0; binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    binding.descriptorCount = 1; binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    info.bindingCount = 1; info.pBindings = &binding;
+    vk(vkCreateDescriptorSetLayout(device_, &info, nullptr, &descriptorLayout_), "Vulkan texture descriptor layout failed");
+}
+uint32_t VulkanRenderer::memoryType(uint32_t bits, VkMemoryPropertyFlags wanted) const {
+    VkPhysicalDeviceMemoryProperties properties; vkGetPhysicalDeviceMemoryProperties(physical_, &properties);
+    for (uint32_t i=0;i<properties.memoryTypeCount;++i) if ((bits&(1u<<i)) && (properties.memoryTypes[i].propertyFlags&wanted)==wanted) return i;
+    throw std::runtime_error("required Vulkan memory type is unavailable");
+}
+void VulkanRenderer::destroyTexture(Texture &texture) {
+    if (texture.sampler) vkDestroySampler(device_, texture.sampler, nullptr);
+    if (texture.view) vkDestroyImageView(device_, texture.view, nullptr);
+    if (texture.image) vkDestroyImage(device_, texture.image, nullptr);
+    if (texture.memory) vkFreeMemory(device_, texture.memory, nullptr);
+    texture.image=VK_NULL_HANDLE;texture.memory=VK_NULL_HANDLE;texture.view=VK_NULL_HANDLE;texture.sampler=VK_NULL_HANDLE;
+}
+void VulkanRenderer::uploadTexture(Texture &texture, int width, int height, const unsigned char *rgba) {
+    if (width<=0||height<=0) throw std::runtime_error("invalid texture dimensions");
+    vkDeviceWaitIdle(device_);destroyTexture(texture);
+    VkDeviceSize size=static_cast<VkDeviceSize>(width)*height*4;
+    VkBuffer staging;VkDeviceMemory stagingMemory;
+    VkBufferCreateInfo buffer{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};buffer.size=size;buffer.usage=VK_BUFFER_USAGE_TRANSFER_SRC_BIT;buffer.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
+    vk(vkCreateBuffer(device_,&buffer,nullptr,&staging),"Vulkan texture staging buffer failed");
+    VkMemoryRequirements req;vkGetBufferMemoryRequirements(device_,staging,&req);
+    VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};alloc.allocationSize=req.size;alloc.memoryTypeIndex=memoryType(req.memoryTypeBits,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    vk(vkAllocateMemory(device_,&alloc,nullptr,&stagingMemory),"Vulkan texture staging memory failed");vkBindBufferMemory(device_,staging,stagingMemory,0);
+    void *mapped=nullptr;vkMapMemory(device_,stagingMemory,0,size,0,&mapped);std::memcpy(mapped,rgba,size);vkUnmapMemory(device_,stagingMemory);
+    VkImageCreateInfo image{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};image.imageType=VK_IMAGE_TYPE_2D;image.format=VK_FORMAT_R8G8B8A8_UNORM;image.extent={static_cast<uint32_t>(width),static_cast<uint32_t>(height),1};image.mipLevels=1;image.arrayLayers=1;image.samples=VK_SAMPLE_COUNT_1_BIT;image.tiling=VK_IMAGE_TILING_OPTIMAL;image.usage=VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT;image.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
+    vk(vkCreateImage(device_,&image,nullptr,&texture.image),"Vulkan texture image failed");vkGetImageMemoryRequirements(device_,texture.image,&req);alloc.allocationSize=req.size;alloc.memoryTypeIndex=memoryType(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);vk(vkAllocateMemory(device_,&alloc,nullptr,&texture.memory),"Vulkan texture memory failed");vkBindImageMemory(device_,texture.image,texture.memory,0);
+    vkResetCommandBuffer(commandBuffer_,0);VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};begin.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;vkBeginCommandBuffer(commandBuffer_,&begin);
+    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};barrier.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED;barrier.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;barrier.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;barrier.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;barrier.image=texture.image;barrier.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};barrier.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(commandBuffer_,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&barrier);
+    VkBufferImageCopy copy{};copy.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};copy.imageExtent={static_cast<uint32_t>(width),static_cast<uint32_t>(height),1};vkCmdCopyBufferToImage(commandBuffer_,staging,texture.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&copy);
+    barrier.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;barrier.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;barrier.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;barrier.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(commandBuffer_,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,0,0,nullptr,0,nullptr,1,&barrier);vkEndCommandBuffer(commandBuffer_);
+    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};submit.commandBufferCount=1;submit.pCommandBuffers=&commandBuffer_;vk(vkQueueSubmit(queue_,1,&submit,VK_NULL_HANDLE),"Vulkan texture upload failed");vkQueueWaitIdle(queue_);vkDestroyBuffer(device_,staging,nullptr);vkFreeMemory(device_,stagingMemory,nullptr);
+    VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};view.image=texture.image;view.viewType=VK_IMAGE_VIEW_TYPE_2D;view.format=VK_FORMAT_R8G8B8A8_UNORM;view.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};vk(vkCreateImageView(device_,&view,nullptr,&texture.view),"Vulkan texture view failed");
+    VkSamplerCreateInfo sampler{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};sampler.magFilter=VK_FILTER_LINEAR;sampler.minFilter=VK_FILTER_LINEAR;sampler.mipmapMode=VK_SAMPLER_MIPMAP_MODE_NEAREST;sampler.addressModeU=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;sampler.addressModeV=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;sampler.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;sampler.maxLod=0;vk(vkCreateSampler(device_,&sampler,nullptr,&texture.sampler),"Vulkan texture sampler failed");
+    if(texture.set==VK_NULL_HANDLE){VkDescriptorSetAllocateInfo sets{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};sets.descriptorPool=descriptorPool_;sets.descriptorSetCount=1;sets.pSetLayouts=&descriptorLayout_;vk(vkAllocateDescriptorSets(device_,&sets,&texture.set),"Vulkan texture descriptor allocation failed");}
+    VkDescriptorImageInfo imageInfo{texture.sampler,texture.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};write.dstSet=texture.set;write.dstBinding=0;write.descriptorCount=1;write.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;write.pImageInfo=&imageInfo;vkUpdateDescriptorSets(device_,1,&write,0,nullptr);
+}
+void VulkanRenderer::createDefaultTextures() {
+    VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,64};VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};pool.maxSets=64;pool.poolSizeCount=1;pool.pPoolSizes=&poolSize;vk(vkCreateDescriptorPool(device_,&pool,nullptr,&descriptorPool_),"Vulkan texture descriptor pool failed");
+    textures_.resize(2);unsigned char white[4]{255,255,255,255};uploadTexture(textures_[0],1,1,white);
+    std::vector<unsigned char> empty(1024*1024*4,0);for(size_t i=0;i<empty.size();i+=4)empty[i]=empty[i+1]=empty[i+2]=255;uploadTexture(textures_[1],1024,1024,empty.data());
+}
+uint32_t VulkanRenderer::loadTexture(const std::string &path) {
+    int width = 0, height = 0, channels = 0;
+    stbi_uc *pixels = stbi_load(path.c_str(), &width, &height, &channels, 4);
+    if (!pixels) throw std::runtime_error("cannot decode texture: " + path);
+    if (textures_.size() >= 64) {
+        stbi_image_free(pixels);
+        throw std::runtime_error("Vulkan texture limit reached");
+    }
+    textures_.emplace_back();
+    uint32_t id = static_cast<uint32_t>(textures_.size() - 1);
+    try {
+        uploadTexture(textures_.back(), width, height, pixels);
+    } catch (...) {
+        destroyTexture(textures_.back());
+        textures_.pop_back();
+        stbi_image_free(pixels);
+        throw;
+    }
+    stbi_image_free(pixels);
+    return id;
+}
+void VulkanRenderer::updateTexture(uint32_t id,int width,int height,const unsigned char *rgba) {if(id>=textures_.size())throw std::runtime_error("invalid Vulkan texture ID");uploadTexture(textures_[id],width,height,rgba);}
+
 void VulkanRenderer::shutdown() {
     if (device_) vkDeviceWaitIdle(device_);
+    for (auto &texture : textures_) destroyTexture(texture);
+    textures_.clear();
+    if (descriptorPool_) vkDestroyDescriptorPool(device_, descriptorPool_, nullptr);
+    if (descriptorLayout_) vkDestroyDescriptorSetLayout(device_, descriptorLayout_, nullptr);
     if (vertexMapped_) vkUnmapMemory(device_, vertexMemory_);
     if (vertexMemory_) vkFreeMemory(device_, vertexMemory_, nullptr);
     if (vertexBuffer_) vkDestroyBuffer(device_, vertexBuffer_, nullptr);

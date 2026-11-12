@@ -1,6 +1,6 @@
 #pragma once
 
-#include "font8x8_basic.h"
+#include "text.hpp"
 #include "geometry.hpp"
 /* Nuklear supplies its own extern "C" guards for C++ consumers. */
 #include "third_party/nuklear.h"
@@ -10,15 +10,16 @@
 #include <cstdint>
 #include <vector>
 
-/* Nuklear command-list renderer for LuaC's existing Vulkan vertex pipeline.
-   Text uses the public-domain 8x8 font, so no font atlas or image descriptor
-   is required. A batch is emitted only when the Vulkan scissor changes. */
+/* Nuklear command-list renderer for LuaC's Vulkan vertex pipeline.
+   Unicode glyphs and images use texture batches; solid geometry uses white. */
 class NuklearCanvas {
 public:
     std::vector<LcVertex> vertices;
     std::vector<LcDraw> draws;
 
     NuklearCanvas() { vertices.reserve(1000000); draws.reserve(256); }
+    const LcTextAtlas &atlas() const { return atlas_; }
+    LcTextAtlas &atlas() { return atlas_; }
 
     void render(nk_context &context, int pixelWidth, int pixelHeight) {
         vertices.clear();
@@ -131,27 +132,48 @@ public:
                 text(c->x, c->y, c->string, c->length, c->height, color(c->foreground));
                 break;
             }
-            case NK_COMMAND_IMAGE:
-            case NK_COMMAND_CUSTOM:
-                /* The editor does not create textured/custom commands. */
+            case NK_COMMAND_IMAGE: {
+                const auto *c = reinterpret_cast<const nk_command_image *>(command);
+                image(c->x, c->y, c->w, c->h, c->img, color(c->col));
                 break;
+            }
+            case NK_COMMAND_CUSTOM: break;
             }
         }
         if (vertices.size() > UINT32_MAX) vertices.resize(UINT32_MAX);
     }
 
-    static float textWidth(float height, const char *value, int length) {
-        int glyphs = 0;
-        for (int i = 0; i < length; ++i)
-            if ((static_cast<unsigned char>(value[i]) & 0xc0) != 0x80) ++glyphs;
-        return glyphs * height * 0.8f;
+    float textWidth(float height, const char *value, int length) {
+        float width = 0;
+        for (int i = 0; i < length;) {
+            int bytes = 1;
+            std::uint32_t cp = decodeUtf8(value, length, i, bytes);
+            width += atlas_.glyph(cp, height).advance;
+            i += bytes;
+        }
+        return width;
     }
 
 private:
     struct Color { float r, g, b, a; };
     struct Clip { int x, y, w, h; };
     Clip clip_{};
+    LcTextAtlas atlas_;
 
+    static std::uint32_t decodeUtf8(const char *value, int length, int offset, int &bytes) {
+        unsigned char lead = static_cast<unsigned char>(value[offset]);
+        std::uint32_t cp = 0xfffd;
+        if (lead < 0x80) cp = lead;
+        else if ((lead & 0xe0) == 0xc0 && offset + 1 < length) { cp = lead & 0x1f; bytes = 2; }
+        else if ((lead & 0xf0) == 0xe0 && offset + 2 < length) { cp = lead & 0x0f; bytes = 3; }
+        else if ((lead & 0xf8) == 0xf0 && offset + 3 < length) { cp = lead & 0x07; bytes = 4; }
+        for (int j = 1; j < bytes; ++j) {
+            unsigned char continuation = static_cast<unsigned char>(value[offset+j]);
+            if ((continuation & 0xc0) != 0x80) { cp = 0xfffd; bytes = 1; break; }
+            cp = (cp << 6) | (continuation & 0x3f);
+        }
+        return cp;
+    }
     static Color color(nk_color c) {
         return {c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f};
     }
@@ -166,21 +188,25 @@ private:
     }
     void vertex(float x, float y, Color c) {
         if (clip_.w <= 0 || clip_.h <= 0) return;
-        vertices.push_back({x, y, c.r, c.g, c.b, c.a});
+        vertices.push_back({x, y, c.r, c.g, c.b, c.a, 0, 0});
     }
-    void batch(uint32_t first) {
+    void vertexUv(float x, float y, float u, float v, Color c) {
+        if (clip_.w <= 0 || clip_.h <= 0) return;
+        vertices.push_back({x, y, c.r, c.g, c.b, c.a, u, v});
+    }
+    void batch(uint32_t first, uint32_t texture = 0) {
         uint32_t count = static_cast<uint32_t>(vertices.size()) - first;
         if (!count) return;
         if (!draws.empty()) {
             LcDraw &last = draws.back();
             if (last.first + last.count == first && last.x == clip_.x && last.y == clip_.y &&
-                last.width == static_cast<uint32_t>(clip_.w) && last.height == static_cast<uint32_t>(clip_.h)) {
+                last.width == static_cast<uint32_t>(clip_.w) && last.height == static_cast<uint32_t>(clip_.h) && last.texture == texture) {
                 last.count += count;
                 return;
             }
         }
         draws.push_back({first, count, clip_.x, clip_.y,
-                         static_cast<uint32_t>(clip_.w), static_cast<uint32_t>(clip_.h)});
+                         static_cast<uint32_t>(clip_.w), static_cast<uint32_t>(clip_.h), texture});
     }
     void triangle(float x0, float y0, float x1, float y1, float x2, float y2, Color c) {
         uint32_t first = static_cast<uint32_t>(vertices.size());
@@ -255,25 +281,28 @@ private:
         for(unsigned i=1;i<count;++i) line(points[i-1].x,points[i-1].y,points[i].x,points[i].y,thickness,c);
         if(closed)line(points[count-1].x,points[count-1].y,points[0].x,points[0].y,thickness,c);
     }
-    void glyph(float x,float y,unsigned char ch,float scale,Color c) {
-        if(ch>=128)ch='?';
-        for(int row=0;row<8;++row) {
-            unsigned char bits=font8x8_basic[ch][row];
-            for(int col=0;col<8;) {
-                if(!(bits&(1u<<col))){++col;continue;}
-                int end=col+1;
-                while(end<8&&(bits&(1u<<end)))++end;
-                rect(x+col*scale,y+row*scale,(end-col)*scale+0.05f,scale+0.05f,c);
-                col=end;
-            }
-        }
+    void image(float x,float y,float w,float h,const struct nk_image &img,Color c) {
+        if(w<=0||h<=0||img.handle.id<=0)return;
+        float u0=0,v0=0,u1=1,v1=1;
+        if(img.w&&img.h){u0=static_cast<float>(img.region[0])/img.w;v0=static_cast<float>(img.region[1])/img.h;u1=static_cast<float>(img.region[0]+img.region[2])/img.w;v1=static_cast<float>(img.region[1]+img.region[3])/img.h;}
+        uint32_t first=static_cast<uint32_t>(vertices.size());
+        vertexUv(x,y,u0,v0,c);vertexUv(x+w,y,u1,v0,c);vertexUv(x,y+h,u0,v1,c);
+        vertexUv(x+w,y,u1,v0,c);vertexUv(x+w,y+h,u1,v1,c);vertexUv(x,y+h,u0,v1,c);batch(first,static_cast<uint32_t>(img.handle.id));
     }
     void text(float x,float y,const char *value,int length,float height,Color c) {
-        float scale=height/10.0f;
-        for(int i=0;i<length;++i) {
-            unsigned char ch=static_cast<unsigned char>(value[i]);
-            if((ch&0xc0)==0x80)continue;
-            glyph(x,y,ch,scale,c); x+=8*scale;
+        float baseline = y + atlas_.ascent(height);
+        for (int i = 0; i < length;) {
+            int bytes = 1;
+            std::uint32_t cp = decodeUtf8(value, length, i, bytes);
+            LcGlyph g = atlas_.glyph(cp, height);
+            if (g.u1 > g.u0) {
+                float x0=x+g.x0,y0=baseline+g.y0,x1=x+g.x1,y1=baseline+g.y1;
+                uint32_t first=static_cast<uint32_t>(vertices.size());
+                vertexUv(x0,y0,g.u0,g.v0,c);vertexUv(x1,y0,g.u1,g.v0,c);vertexUv(x0,y1,g.u0,g.v1,c);
+                vertexUv(x1,y0,g.u1,g.v0,c);vertexUv(x1,y1,g.u1,g.v1,c);vertexUv(x0,y1,g.u0,g.v1,c);
+                batch(first,1);
+            }
+            x += g.advance; i += bytes;
         }
     }
 };

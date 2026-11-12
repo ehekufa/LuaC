@@ -134,7 +134,7 @@ print(next(5), next(2)) -- 15  17
 | FFI | Базовый `ffi.open/close/call`, typed signatures через system libffi runtime; structs/callbacks/varargs не поддержаны |
 | HTTPS/TLS/WebSocket | Настоящий mbedTLS, CA и hostname verification; `ws`/`wss` client и server, optional TLS build dependency |
 | Audio | Native PCM/WAV/DSP работают; playback через miniaudio включается опционально |
-| Engine | Native 2D world/simulation и Studio viewport работают; physics solver/asset pipeline не заявляются готовыми |
+| Engine | Native 2D world, opt-in sequential AABB physics, PNG/JPEG assets, input и UTF-8 text работают; это не rotation-aware rigid-body engine |
 | `debug` library, `string.dump`, `string.pack/unpack/packsize` | Ещё не реализованы |
 | Раздельные integer/float subtypes | Signed int64 literals/arithmetic/keys/bitwise и float subtype; integer overflow использует two’s-complement wrap |
 | `math.maxinteger/mininteger` | Полный диапазон `INT64_MAX`/`INT64_MIN` |

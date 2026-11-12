@@ -53,6 +53,13 @@ python3 tests/websocket_test.py
 ./luac --aot tests/websocket_client.lua -o tests/.tmp/websocket-client-aot >/dev/null
 LUAC_EXECUTABLE="$(pwd)/tests/.tmp/websocket-client-aot" python3 tests/websocket_test.py --client-only
 
+./luac tests/game.lua > tests/.tmp/game-jit.out
+printf '%s\n' 'LuaC game assets physics input: OK' > tests/.tmp/game-expected.out
+cmp tests/.tmp/game-expected.out tests/.tmp/game-jit.out
+./luac --aot tests/game.lua -o tests/.tmp/game-aot >/dev/null
+tests/.tmp/game-aot > tests/.tmp/game-aot.out
+cmp tests/.tmp/game-expected.out tests/.tmp/game-aot.out
+
 ./luac tests/audio.lua > tests/.tmp/audio-jit.out
 printf '%s\n' 'LuaC native audio: OK' > tests/.tmp/audio-expected.out
 cmp tests/.tmp/audio-expected.out tests/.tmp/audio-jit.out
@@ -70,6 +77,7 @@ tests/.tmp/api-test
 ./luac --emit-c tests/compat.lua -o tests/.tmp/compat.c >/dev/null
 ./luac --emit-c tests/libraries.lua -o tests/.tmp/libraries.c >/dev/null
 ./luac --emit-c tests/audio.lua -o tests/.tmp/audio.c >/dev/null
+./luac --emit-c tests/game.lua -o tests/.tmp/game.c >/dev/null
 ./luac --emit-c tests/runtime.lua -o tests/.tmp/runtime.c >/dev/null
 grep -q 'lc_jit_main' tests/.tmp/demo.c
 grep -q 'LC_RELEASE' tests/.tmp/demo.c
@@ -100,6 +108,10 @@ if [ "${SANITIZE:-0}" = 1 ]; then
     -fno-omit-frame-pointer -DLUAC_STANDALONE \
     tests/.tmp/runtime.c -o tests/.tmp/runtime-sanitize -lm -ldl
   ASAN_OPTIONS=detect_leaks=1 tests/.tmp/runtime-sanitize >/dev/null
+  cc -std=gnu99 -O1 -g -fsanitize=address,undefined \
+    -fno-omit-frame-pointer -DLUAC_STANDALONE \
+    tests/.tmp/game.c -o tests/.tmp/game-sanitize -lm -ldl
+  ASAN_OPTIONS=detect_leaks=1 tests/.tmp/game-sanitize >/dev/null
 fi
 
 echo 'JIT, AOT, C generation and diagnostics: OK'

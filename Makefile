@@ -60,13 +60,13 @@ endif
 .PHONY: all clean test install libraries gui android-check
 all: luac
 
-luac: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_tls.h src/luac_audio.h src/third_party/miniaudio.h
+luac: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/third_party/miniaudio.h src/third_party/stb_image.h
 	$(CC) -std=gnu99 $(CFLAGS) $(WARNINGS) -DLUAC_RUNTIME_PATH=\"$(RUNTIME_PATH)\" '-DLUAC_DEFAULT_CFLAGS="$(NATIVE_CFLAGS)"' '-DLUAC_DEFAULT_LDFLAGS="$(NATIVE_LDFLAGS)"' src/luac.c -o $@ $(DL_LIBS)
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/luac.o: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_tls.h src/luac_audio.h src/third_party/miniaudio.h | $(BUILD)
+$(BUILD)/luac.o: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/third_party/miniaudio.h src/third_party/stb_image.h | $(BUILD)
 	$(CC) -std=gnu99 $(CFLAGS) $(WARNINGS) -fPIC -DLUAC_LIBRARY_ONLY -DLUAC_BUILD_SHARED -DLUAC_RUNTIME_PATH=\"$(RUNTIME_PATH)\" -c src/luac.c -o $@
 
 libraries: $(BUILD)/libluac.a $(BUILD)/libluac.$(SHARED_EXT)
@@ -81,7 +81,7 @@ $(BUILD)/libluac.$(SHARED_EXT): $(BUILD)/luac.o
 $(BUILD)/nuklear.o: gui/nuklear_impl.c gui/third_party/nuklear.h | $(BUILD)
 	$(CC) -std=c99 $(CFLAGS) $(WARNINGS) -I gui -c gui/nuklear_impl.c -o $@
 
-$(BUILD)/ui-test$(EXE): tests/ui_test.cpp gui/nuklear_canvas.hpp gui/geometry.hpp $(BUILD)/nuklear.o
+$(BUILD)/ui-test$(EXE): tests/ui_test.cpp gui/nuklear_canvas.hpp gui/geometry.hpp gui/text.hpp gui/font_plex_mono.hpp src/third_party/stb_truetype.h $(BUILD)/nuklear.o
 	$(CXX) -std=c++17 $(CXXFLAGS) $(WARNINGS) -I gui tests/ui_test.cpp $(BUILD)/nuklear.o -o $@
 
 $(BUILD)/engine-test$(EXE): tests/engine_test.cpp src/engine.hpp | $(BUILD)
@@ -99,12 +99,12 @@ gui: $(BUILD)/shader.vert.spv $(BUILD)/shader.frag.spv $(BUILD)/nuklear.o
 test: luac $(BUILD)/ui-test$(EXE) $(BUILD)/engine-test$(EXE)
 	./tests/run.sh
 
-install: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_tls.h src/luac_audio.h src/third_party/miniaudio.h src/engine.hpp libraries
+install: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/third_party/miniaudio.h src/third_party/stb_image.h src/engine.hpp libraries
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/share/luac
 	install -m644 src/runtime.h $(DESTDIR)$(PREFIX)/share/luac/runtime.h
-	install -m644 src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_tls.h src/luac_audio.h $(DESTDIR)$(PREFIX)/share/luac/
+	install -m644 src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h $(DESTDIR)$(PREFIX)/share/luac/
 	install -d $(DESTDIR)$(PREFIX)/share/luac/third_party
-	install -m644 src/third_party/miniaudio.h src/third_party/miniaudio-LICENSE $(DESTDIR)$(PREFIX)/share/luac/third_party/
+	install -m644 src/third_party/miniaudio.h src/third_party/miniaudio-LICENSE src/third_party/stb_image.h src/third_party/stb_truetype.h src/third_party/stb-LICENSE $(DESTDIR)$(PREFIX)/share/luac/third_party/
 	install -m644 src/luac.h $(DESTDIR)$(PREFIX)/include/luac.h
 	install -m644 src/engine.hpp $(DESTDIR)$(PREFIX)/include/engine.hpp
 	install -m644 $(BUILD)/libluac.a $(DESTDIR)$(PREFIX)/lib/libluac.a
