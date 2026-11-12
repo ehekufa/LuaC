@@ -197,6 +197,10 @@ struct LcContext {
     int line;
     const char *source;
     char message[1024];
+    /* Optional embedder-owned print capture (Android project runner). */
+    int capture_output;
+    char *captured_output;
+    size_t captured_length, captured_capacity;
 };
 
 static LcValue lc_nil(void) { LcValue v; memset(&v, 0, sizeof(v)); return v; }
@@ -1096,15 +1100,31 @@ static LcValue lc_builtin_coroutine_wrap(LcContext *ctx, LcFunction *self, int a
 }
 
 /* Built-in library. */
+static void lc_print_bytes(LcContext *ctx, const char *data, size_t length) {
+    if (!ctx->capture_output) {
+        if (length) fwrite(data, 1, length, stdout);
+        return;
+    }
+    if (ctx->captured_length + length + 1 > ctx->captured_capacity) {
+        size_t capacity = ctx->captured_capacity ? ctx->captured_capacity * 2 : 256;
+        char *memory;
+        while (capacity < ctx->captured_length + length + 1) capacity *= 2;
+        memory = (char *)realloc(ctx->captured_output, capacity);
+        if (!memory) { lc_error(ctx, "out of memory capturing output"); return; }
+        ctx->captured_output = memory; ctx->captured_capacity = capacity;
+    }
+    if (length) memcpy(ctx->captured_output + ctx->captured_length, data, length);
+    ctx->captured_length += length; ctx->captured_output[ctx->captured_length] = 0;
+}
 static LcValue lc_builtin_print(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
     int i; (void)self;
     for (i = 0; i < argc; ++i) {
         LcValue s = lc_to_string(ctx, argv[i]);
-        if (i) putchar('\t');
-        if (s.type == LC_STRING) fwrite(s.as.string->data, 1, s.as.string->length, stdout);
+        if (i) lc_print_bytes(ctx, "\t", 1);
+        if (s.type == LC_STRING) lc_print_bytes(ctx, s.as.string->data, s.as.string->length);
         lc_release(ctx, s);
     }
-    putchar('\n'); fflush(stdout); return lc_nil();
+    lc_print_bytes(ctx, "\n", 1); fflush(stdout); return lc_nil();
 }
 
 static LcValue lc_builtin_type(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
@@ -2873,6 +2893,7 @@ static void lc_context_destroy(LcContext *ctx) {
 #ifdef _WIN32
     if (ctx->socket_initialized) WSACleanup();
 #endif
+    free(ctx->captured_output);
     free(ctx);
 }
 

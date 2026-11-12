@@ -154,9 +154,9 @@ Workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) запус
 | `LuaC-macos-arm64` | CLI, `libluac.a`, `libluac.dylib`, headers |
 | `LuaC-Studio-windows-x86_64` | Vulkan GUI `.exe`, shaders, GLFW DLL |
 | `LuaC-Studio-linux-x86_64` | Vulkan GUI, CLI, shaders |
-| `LuaC-Studio-Android-APK` | устанавливаемый debug APK с Java-редактором и Vulkan Surface |
+| `LuaC-Studio-Android-APK` | устанавливаемый APK с проектами, многофайловым runtime, assets и game viewport |
 
-Для JIT/AOT на desktop нужен системный C-компилятор (`cc`, GCC или Clang). В APK синтаксическая проверка и генерация C выполняются внутри нативной библиотеки; запуск JIT на Android не требуется и не выполняется, поскольку Android не поставляется с host C toolchain.
+Для JIT/AOT на desktop нужен системный C-компилятор (`cc`, GCC или Clang). В APK синтаксическая проверка и генерация C выполняются внутри нативной библиотеки. **RUN** использует встроенный AST runtime поверх тех же native libraries, поэтому проекты запускаются на телефоне без host C toolchain.
 
 ## LuaC Studio — Vulkan GUI
 
@@ -202,7 +202,7 @@ make gui
 
 Это не отдельный закрытый редактор: тот же native world доступен в Lua через `engine`, а C++17 header `src/engine.hpp` подключается к любому проекту через **`LuaC::engine` без Vulkan и без Lua runtime**. Пример — `examples/embed/engine_main.cpp`.
 
-Android-версия находится в `android/`. При запуске открывается **Snake**: управление свайпами и экранными стрелками, очки, ускорение и рестарт касанием. Кнопка **LUAC EDITOR** открывает редактор, проверку, просмотр сгенерированного C и Vulkan Surface. Vulkan и native library инициализируются защищённо, поэтому их отсутствие не мешает игре; Vulkan не является обязательным для установки APK. Сборка из workflow использует Android SDK 35, NDK 27 и CMake.
+Android-версия находится в `android/`. При запуске открывается **список проектов**. Новый проект содержит `main.lua`, вложенные Lua-модули и PNG в `assets/`; можно создавать дополнительные файлы и папки, редактировать их, импортировать PNG/JPG через системный picker и удалять лишнее. **RUN** выполняет `main.lua`, поддерживает disk `require()` между файлами и открывает игровой viewport с `print()`/ошибками в консоли. Глобальные `world` и `update(dt)` подключаются к frame loop: entities, textures, physics, camera, touch input и overlay text обновляются каждый кадр. **STOP / EDIT** завершает runtime и освобождает контекст. Проекты хранятся в приватной папке APK и не требуют разрешения на общее хранилище. Сборка из workflow использует Android SDK 35, NDK 27 и CMake.
 
 ## Библиотеки и C API
 
@@ -226,11 +226,11 @@ luac_free(c);
 luac_free(error);
 ```
 
-Также доступны `luac_check`, `luac_version` и `luac_free`. Тот же API используется Android JNI и может подключаться к C/C++-проектам.
+Также доступны `luac_check`, `luac_version` и `luac_free`. При compile definition `LUAC_EMBEDDED_RUNTIME` добавляются `luac_project_open/step/touch/close` для многофайлового in-process runtime без C toolchain; `step` возвращает JSON scene/output. Тот же API используется Android JNI и может подключаться к C/C++-проектам. Regression test — `tests/embedded_test.c` и `tests/embedded_project/`.
 
 ## Копирование в собственный build
 
-Lua/LuaJIT не скачиваются и не подключаются. Для compiler + всех native libraries скопируйте `src/luac.c`, `src/luac.h`, `src/runtime.h`, `src/luac_libraries.h`, `src/luac_tls.h`, `src/luac_audio.h` и `src/third_party/`. Без playback miniaudio header не компилируется, но должен быть доступен в source distribution. Для C++ engine отдельно достаточно `src/engine.hpp`:
+Lua/LuaJIT не скачиваются и не подключаются. Для compiler + всех native libraries скопируйте `src/luac.c`, `src/luac.h`, `src/runtime.h`, `src/luac_libraries.h`, `src/luac_tls.h`, `src/luac_audio.h` и `src/third_party/`; для embedded project runner также нужен `src/luac_interpreter.h`. Без playback miniaudio header не компилируется, но должен быть доступен в source distribution. Для C++ engine отдельно достаточно `src/engine.hpp`:
 
 ```sh
 cc -std=gnu99 -DLUAC_LIBRARY_ONLY -DLUAC_RUNTIME_PATH=\"runtime.h\" \

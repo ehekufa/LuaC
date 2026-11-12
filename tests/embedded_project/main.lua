@@ -1,0 +1,12 @@
+require('settings')
+local player = require('scripts.player')
+world = engine.world()
+engine.set_gravity(world, 0, 100)
+local texture, textureError = engine.load_texture('assets/luac_logo.png')
+assert(texture, textureError)
+hero = player.create(world, texture)
+engine.text(world, projectName, 10, 20, 18)
+function update(dt)
+  player.update(hero, dt)
+end
+print('Project started:', projectName)

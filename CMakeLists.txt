@@ -142,6 +142,14 @@ if(BUILD_TESTING)
     add_executable(luac-engine-test tests/engine_test.cpp)
     target_link_libraries(luac-engine-test PRIVATE luac_engine)
     add_test(NAME luac-native-engine COMMAND luac-engine-test)
+    add_executable(luac-embedded-test tests/embedded_test.c src/luac.c)
+    target_compile_definitions(luac-embedded-test PRIVATE
+        LUAC_LIBRARY_ONLY LUAC_EMBEDDED_RUNTIME LUAC_RUNTIME_PATH="runtime.h"
+        LUAC_TEST_PROJECT="${CMAKE_CURRENT_SOURCE_DIR}/tests/embedded_project"
+    )
+    target_include_directories(luac-embedded-test PRIVATE src)
+    target_link_libraries(luac-embedded-test PRIVATE luac_runtime)
+    add_test(NAME luac-embedded-project COMMAND luac-embedded-test)
 
     if(LUAC_BUILD_CLI)
         add_test(NAME luac-compat-jit COMMAND luac_compiler
@@ -277,9 +285,9 @@ install(EXPORT LuaCTargets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LuaC
 )
 install(FILES src/luac.h src/engine.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h
+install(FILES src/runtime.h src/luac_interpreter.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h
+install(FILES src/runtime.h src/luac_interpreter.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h
     DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)
 install(DIRECTORY src/third_party DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY src/third_party DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)

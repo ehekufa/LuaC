@@ -1,366 +1,366 @@
 package com.luac.studio;
 
 import android.app.Activity;
-import android.content.Context;
-import android.graphics.Canvas;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Color;
-import android.graphics.Paint;
+import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.MotionEvent;
-import android.view.Surface;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
+import android.provider.OpenableColumns;
+import android.text.InputType;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import java.util.ArrayList;
-import java.util.Random;
+import android.widget.Toast;
+import java.io.File;
+import java.io.InputStream;
+import org.json.JSONObject;
 
 public final class MainActivity extends Activity {
+    private static final int PICK_ASSET = 41;
+    private static final int BACKGROUND = Color.rgb(9, 13, 22);
+    private static final int PANEL = Color.rgb(14, 21, 34);
+    private static final int ACCENT = Color.rgb(66, 221, 176);
+    private static final int TEXT = Color.rgb(205, 220, 231);
+
     private static boolean nativeAvailable;
     private static String nativeLoadError = "";
     static {
-        try {
-            System.loadLibrary("luac_native");
-            nativeAvailable = true;
-        } catch (Throwable error) {
-            nativeAvailable = false;
-            nativeLoadError = error.getClass().getSimpleName();
-        }
+        try { System.loadLibrary("luac_native"); nativeAvailable = true; }
+        catch (Throwable error) { nativeLoadError = error.getClass().getSimpleName(); }
     }
-
-    private EditText editor;
-    private TextView output;
-    private SnakeView snake;
-    private boolean snakeVisible;
-    private final Handler handler = new Handler(Looper.getMainLooper());
 
     private static native String nativeCheck(String source);
     private static native String nativeGenerate(String source);
     private static native String nativeVersion();
-    private static native boolean nativeVulkanCreate(Surface surface);
+    private static native String nativeOpenProject(String root);
+    private static native String nativeStepProject(double dt);
+    private static native void nativeTouchProject(int id, double x, double y, boolean down);
+    private static native void nativeCloseProject();
+    private static native boolean nativeVulkanCreate(android.view.Surface surface);
     private static native void nativeVulkanDraw();
     private static native void nativeVulkanDestroy();
 
-    private final String demo =
-        "-- LuaC Studio for Android\n" +
-        "local function greet(name)\n" +
-        "  return 'Hello, ' .. name\n" +
-        "end\n\n" +
-        "print(greet('Vulkan'))\n";
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private ProjectStore store;
+    private File project, directory, editorFile, importDirectory;
+    private EditText editor;
+    private TextView output;
+    private RuntimeView runtimeView;
+    private boolean running, opening, runtimeError;
+    private long previousFrame;
+    private final StringBuilder console = new StringBuilder();
+
+    private final Runnable frame = new Runnable() {
+        @Override public void run() {
+            if (!running || !nativeAvailable) return;
+            long now = System.nanoTime();
+            double dt = previousFrame == 0 ? 1.0 / 60 : Math.min(.05, (now - previousFrame) / 1e9);
+            previousFrame = now;
+            try { applyFrame(new JSONObject(nativeStepProject(dt))); }
+            catch (Throwable error) { appendConsole("Runtime bridge error: " + error + "\n"); running = false; }
+            if (running) handler.postDelayed(this, 16);
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        showSnake();
+        store = new ProjectStore(this);
+        try { if (store.projects().isEmpty()) store.createProject("Demo"); }
+        catch (Exception error) { toast(error); }
+        showProjects();
     }
 
+    private LinearLayout screen() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BACKGROUND);
+        root.setPadding(18, 12, 18, 12);
+        setContentView(root);
+        return root;
+    }
+    private TextView text(String value, int size, int color) {
+        TextView view = new TextView(this);
+        view.setText(value); view.setTextSize(size); view.setTextColor(color);
+        view.setPadding(4, 8, 4, 8);
+        return view;
+    }
     private Button button(String label, View.OnClickListener listener) {
         Button button = new Button(this);
-        button.setText(label);
-        button.setOnClickListener(listener);
+        button.setText(label); button.setOnClickListener(listener);
         return button;
     }
-
-    private void showSnake() {
-        snakeVisible = true;
-        int background = Color.rgb(9, 13, 22);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(background);
-        root.setPadding(18, 12, 18, 12);
-
-        TextView title = new TextView(this);
-        title.setText("LuaC Snake");
-        title.setTextColor(Color.rgb(66, 221, 176));
-        title.setTextSize(26);
-        title.setGravity(android.view.Gravity.CENTER);
-        root.addView(title);
-
-        TextView hint = new TextView(this);
-        hint.setText("Свайп или кнопки • собирай яблоки • после проигрыша коснись поля");
-        hint.setTextColor(Color.rgb(180, 195, 212));
-        hint.setGravity(android.view.Gravity.CENTER);
-        root.addView(hint);
-
-        snake = new SnakeView(this);
-        root.addView(snake, new LinearLayout.LayoutParams(-1, 0, 1.0f));
-
-        LinearLayout directions = new LinearLayout(this);
-        directions.setOrientation(LinearLayout.HORIZONTAL);
-        directions.addView(button("▲", v -> snake.turn(0, -1)), new LinearLayout.LayoutParams(0, -2, 1));
-        directions.addView(button("◀", v -> snake.turn(-1, 0)), new LinearLayout.LayoutParams(0, -2, 1));
-        directions.addView(button("▼", v -> snake.turn(0, 1)), new LinearLayout.LayoutParams(0, -2, 1));
-        directions.addView(button("▶", v -> snake.turn(1, 0)), new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(directions);
-        root.addView(button("LUAC EDITOR", v -> showEditor()));
-        setContentView(root);
-        snake.start();
+    private LinearLayout row() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        return row;
     }
+    private void weighted(LinearLayout row, View view) { row.addView(view, new LinearLayout.LayoutParams(0, -2, 1)); }
+    private void toast(Throwable error) { Toast.makeText(this, String.valueOf(error.getMessage() == null ? error : error.getMessage()), Toast.LENGTH_LONG).show(); }
+    private void toast(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
 
-    private String safeCompilerCall(String source, boolean generate) {
-        if (!nativeAvailable) return "Native library is unavailable: " + nativeLoadError +
-            "\nSnake still works; rebuild the APK for this device ABI.";
-        try {
-            return generate ? nativeGenerate(source) : nativeCheck(source);
-        } catch (Throwable error) {
-            return "Compiler error: " + error;
-        }
-    }
-
-    private void safeVulkan(SurfaceView view, int action) {
-        if (!nativeAvailable) return;
-        try {
-            if (action == 0) nativeVulkanCreate(view.getHolder().getSurface());
-            else if (action == 1) nativeVulkanDraw();
-            else nativeVulkanDestroy();
-        } catch (Throwable error) {
-            if (output != null) output.setText("Vulkan is unavailable on this device: " + error +
-                "\nThe editor and Snake remain available.");
-        }
-    }
-
-    private void showEditor() {
-        snakeVisible = false;
-        handler.removeCallbacksAndMessages(null);
-        int background = Color.rgb(9, 13, 22);
-        int accent = Color.rgb(66, 221, 176);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(background);
-        root.setPadding(18, 12, 18, 12);
-
-        SurfaceView vulkan = new SurfaceView(this);
-        root.addView(vulkan, new LinearLayout.LayoutParams(-1, 170));
-        vulkan.getHolder().addCallback(new SurfaceHolder.Callback() {
-            @Override public void surfaceCreated(SurfaceHolder holder) { safeVulkan(vulkan, 0); }
-            @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) { safeVulkan(vulkan, 1); }
-            @Override public void surfaceDestroyed(SurfaceHolder holder) { safeVulkan(vulkan, 2); }
-        });
-
-        TextView title = new TextView(this);
+    private void showProjects() {
+        stopRuntime();
+        project = directory = editorFile = null;
+        LinearLayout root = screen();
         String version = "native unavailable";
-        if (nativeAvailable) {
-            try { version = nativeVersion(); } catch (Throwable error) { version = error.toString(); }
-        }
-        title.setText("LuaC Studio  •  " + version + "  •  Vulkan");
-        title.setTextColor(accent);
-        title.setTextSize(18);
-        title.setPadding(0, 12, 0, 8);
-        root.addView(title);
-
-        editor = new EditText(this);
-        editor.setText(demo);
-        editor.setTextColor(Color.rgb(220, 230, 241));
-        editor.setHintTextColor(Color.GRAY);
-        editor.setBackgroundColor(Color.rgb(14, 21, 34));
-        editor.setPadding(18, 12, 18, 12);
-        editor.setGravity(android.view.Gravity.TOP);
-        editor.setMinLines(9);
-        root.addView(editor, new LinearLayout.LayoutParams(-1, 0, 1.0f));
-
-        LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
-        Button check = button("CHECK", v -> output.setText(safeCompilerCall(editor.getText().toString(), false)));
-        Button generate = button("GENERATE C", v -> output.setText(safeCompilerCall(editor.getText().toString(), true)));
-        Button reset = button("DEMO", v -> editor.setText(demo));
-        Button back = button("SNAKE", v -> showSnake());
-        buttons.addView(check, new LinearLayout.LayoutParams(0, -2, 1));
-        buttons.addView(generate, new LinearLayout.LayoutParams(0, -2, 1));
-        buttons.addView(reset, new LinearLayout.LayoutParams(0, -2, 1));
-        buttons.addView(back, new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(buttons);
-
+        if (nativeAvailable) try { version = nativeVersion(); } catch (Throwable ignored) { }
+        root.addView(text("LuaC Studio", 28, ACCENT));
+        root.addView(text("Projects • " + version + " • in-process runtime", 14, TEXT));
+        LinearLayout actions = row();
+        weighted(actions, button("＋ NEW PROJECT", v -> newProjectDialog()));
+        weighted(actions, button("CREATE DEMO", v -> {
+            try { showProject(store.createProject("Demo")); } catch (Exception error) { toast(error); }
+        }));
+        root.addView(actions);
         ScrollView scroll = new ScrollView(this);
-        output = new TextView(this);
-        output.setTextIsSelectable(true);
-        output.setTextColor(Color.rgb(180, 195, 212));
-        output.setTextSize(12);
-        output.setText("Syntax check and native C generation run inside the APK.\n" +
-            "JIT/AOT execution requires a host C toolchain; use the desktop build to run programs.");
-        scroll.addView(output);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 230));
-        setContentView(root);
+        LinearLayout list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
+        for (File item : store.projects()) {
+            list.addView(text(item.getName(), 21, Color.WHITE));
+            LinearLayout buttons = row();
+            weighted(buttons, button("FILES", v -> showProject(item)));
+            weighted(buttons, button("▶ RUN", v -> startProject(item)));
+            weighted(buttons, button("DELETE", v -> confirmDelete(item, this::showProjects)));
+            list.addView(buttons);
+        }
+        if (store.projects().isEmpty()) list.addView(text("Create a project to begin.", 16, TEXT));
+        scroll.addView(list); root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(text("Each project has main.lua, Lua modules and an assets folder. No PC or C compiler is needed on the phone.", 13, TEXT));
+    }
+
+    private void newProjectDialog() {
+        EditText name = new EditText(this); name.setHint("Project name"); name.setSingleLine();
+        new AlertDialog.Builder(this).setTitle("New project").setView(name)
+            .setPositiveButton("Create", (dialog, which) -> {
+                try { showProject(store.createProject(name.getText().toString())); }
+                catch (Exception error) { toast(error); }
+            }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void showProject(File selected) { project = selected; showDirectory(selected); }
+    private void showDirectory(File selected) {
+        stopRuntime(); directory = selected; editorFile = null;
+        LinearLayout root = screen();
+        root.addView(text(project.getName(), 23, ACCENT));
+        String relative = project.toURI().relativize(directory.toURI()).getPath();
+        root.addView(text(relative.isEmpty() ? "Project files" : relative, 14, TEXT));
+        LinearLayout actions = row();
+        weighted(actions, button("▶ RUN", v -> startProject(project)));
+        weighted(actions, button("＋FILE", v -> nameDialog("New Lua/text file", "script.lua", name -> {
+            try { showEditor(store.createFile(directory, name)); } catch (Exception error) { toast(error); }
+        })));
+        weighted(actions, button("＋FOLDER", v -> nameDialog("New folder", "scripts", name -> {
+            try { store.createFolder(directory, name); showDirectory(directory); } catch (Exception error) { toast(error); }
+        })));
+        weighted(actions, button("ASSET＋", v -> pickAsset()));
+        root.addView(actions);
+        if (!directory.equals(project)) root.addView(button("..  PARENT FOLDER", v -> showDirectory(directory.getParentFile())));
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
+        for (File item : store.children(directory)) {
+            String icon = item.isDirectory() ? "▸  " : isImage(item) ? "▧  " : "   ";
+            list.addView(button(icon + item.getName(), v -> openFile(item)));
+        }
+        scroll.addView(list); root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(button("PROJECTS", v -> showProjects()));
+    }
+
+    private void openFile(File file) {
+        if (file.isDirectory()) showDirectory(file);
+        else if (isImage(file)) showImage(file);
+        else showEditor(file);
+    }
+    private static boolean isImage(File file) {
+        String name = file.getName().toLowerCase();
+        return name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".webp");
+    }
+    private void showImage(File file) {
+        LinearLayout root = screen();
+        root.addView(text(file.getName(), 22, ACCENT));
+        ImageView image = new ImageView(this); image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        image.setImageURI(Uri.fromFile(file)); image.setBackgroundColor(PANEL);
+        root.addView(image, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(text("Project path: " + project.toURI().relativize(file.toURI()).getPath() + "\nUse it with engine.load_texture().", 15, TEXT));
+        LinearLayout actions = row();
+        weighted(actions, button("BACK", v -> showDirectory(file.getParentFile())));
+        weighted(actions, button("DELETE", v -> confirmDelete(file, () -> showDirectory(file.getParentFile()))));
+        root.addView(actions);
+    }
+
+    private void showEditor(File file) {
+        stopRuntime(); editorFile = file; directory = file.getParentFile();
+        LinearLayout root = screen();
+        root.addView(text(project.getName() + " / " + project.toURI().relativize(file.toURI()).getPath(), 17, ACCENT));
+        editor = new EditText(this);
+        try { editor.setText(store.read(file)); } catch (Exception error) { editor.setText(""); toast(error); }
+        editor.setTextColor(Color.rgb(220, 230, 241)); editor.setHintTextColor(Color.GRAY);
+        editor.setBackgroundColor(PANEL); editor.setPadding(18, 12, 18, 12);
+        editor.setGravity(Gravity.TOP); editor.setTypeface(Typeface.MONOSPACE); editor.setTextSize(14);
+        editor.setHorizontallyScrolling(true);
+        editor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        root.addView(editor, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout actions = row();
+        weighted(actions, button("SAVE", v -> saveEditor()));
+        weighted(actions, button("▶ RUN", v -> { if (saveEditor()) startProject(project); }));
+        weighted(actions, button("CHECK", v -> { if (saveEditor()) output.setText(compilerCall(editor.getText().toString(), false)); }));
+        weighted(actions, button("C", v -> { if (saveEditor()) output.setText(compilerCall(editor.getText().toString(), true)); }));
+        root.addView(actions);
+        LinearLayout navigation = row();
+        weighted(navigation, button("FILES", v -> { if (saveEditor()) showDirectory(directory); }));
+        weighted(navigation, button("DELETE", v -> confirmDelete(file, () -> showDirectory(directory))));
+        root.addView(navigation);
+        ScrollView scroll = new ScrollView(this); output = text("Ready. RUN executes main.lua and all its require() modules.", 13, TEXT);
+        output.setTextIsSelectable(true); scroll.addView(output);
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, 150));
+    }
+
+    private boolean saveEditor() {
+        if (editor == null || editorFile == null) return true;
+        try { store.write(editorFile, editor.getText().toString()); return true; }
+        catch (Exception error) { toast(error); return false; }
+    }
+    private String compilerCall(String source, boolean generate) {
+        if (!nativeAvailable) return "Native library unavailable: " + nativeLoadError;
+        try { return generate ? nativeGenerate(source) : nativeCheck(source); }
+        catch (Throwable error) { return "Compiler error: " + error; }
+    }
+
+    private void startProject(File selected) {
+        if (opening) return;
+        stopRuntime();
+        project = selected;
+        if (!new File(selected, "main.lua").isFile()) { toast("main.lua is missing"); return; }
+        if (!nativeAvailable) { toast("Native library unavailable: " + nativeLoadError); return; }
+        opening = true;
+        LinearLayout root = screen();
+        root.addView(text("Starting " + selected.getName() + "…", 24, ACCENT));
+        root.addView(text("Loading main.lua, modules and textures", 16, TEXT));
+        new Thread(() -> {
+            String result;
+            try { result = nativeOpenProject(selected.getAbsolutePath()); }
+            catch (Throwable error) { result = String.valueOf(error); }
+            final String completed = result;
+            handler.post(() -> {
+                opening = false;
+                try { showRuntime(selected, new JSONObject(completed)); }
+                catch (Exception error) {
+                    new AlertDialog.Builder(this).setTitle("Project could not start").setMessage(completed)
+                        .setPositiveButton("OK", (dialog, which) -> showProject(selected)).show();
+                }
+            });
+        }, "LuaC-project-loader").start();
+    }
+
+    private void showRuntime(File selected, JSONObject initial) {
+        project = selected; console.setLength(0); runtimeError = false;
+        LinearLayout root = screen();
+        LinearLayout title = row();
+        weighted(title, text("▶ " + selected.getName(), 19, ACCENT));
+        title.addView(button("STOP / EDIT", v -> showProject(selected)));
+        root.addView(title);
+        runtimeView = new RuntimeView(this, selected, (id, x, y, down) -> {
+            if (running) nativeTouchProject(id, x, y, down);
+        });
+        root.addView(runtimeView, new LinearLayout.LayoutParams(-1, 0, 1));
+        ScrollView scroll = new ScrollView(this); output = text("", 13, TEXT); output.setTypeface(Typeface.MONOSPACE);
+        output.setTextIsSelectable(true); scroll.addView(output);
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, 180));
+        running = true; previousFrame = 0; applyFrame(initial);
+        if (running) handler.post(frame);
+    }
+
+    private void applyFrame(JSONObject value) {
+        if (runtimeView == null) return;
+        runtimeView.setFrame(value);
+        appendConsole(value.optString("output"));
+        if (!value.optBoolean("ok", false) && !runtimeError) {
+            runtimeError = true; running = false;
+            appendConsole("\n" + value.optString("error", "Runtime stopped") + "\n");
+        }
+    }
+    private void appendConsole(String message) {
+        if (message == null || message.isEmpty() || output == null) return;
+        console.append(message);
+        if (console.length() > 100000) console.delete(0, console.length() - 80000);
+        output.setText(console.toString());
+    }
+
+    private void stopRuntime() {
+        handler.removeCallbacks(frame);
+        boolean wasRunning = running;
+        running = false; previousFrame = 0;
+        if (nativeAvailable && (wasRunning || runtimeView != null)) {
+            try { nativeCloseProject(); } catch (Throwable ignored) { }
+        }
+        if (runtimeView != null) runtimeView.dispose();
+        runtimeView = null;
+    }
+
+    private void pickAsset() {
+        importDirectory = directory;
+        String relative = project.toURI().relativize(directory.toURI()).getPath();
+        if (!relative.startsWith("assets/")) importDirectory = new File(project, "assets");
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE); intent.setType("image/*");
+        startActivityForResult(intent, PICK_ASSET);
+    }
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != PICK_ASSET || result != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            File imported = store.importFile(importDirectory, displayName(uri), input);
+            toast("Imported " + imported.getName()); showDirectory(importDirectory);
+        } catch (Exception error) { toast(error); }
+    }
+    private String displayName(Uri uri) {
+        try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (column >= 0) return cursor.getString(column);
+            }
+        }
+        return "asset.png";
+    }
+
+    private void nameDialog(String title, String hint, NameAction action) {
+        EditText input = new EditText(this); input.setHint(hint); input.setSingleLine();
+        new AlertDialog.Builder(this).setTitle(title).setView(input)
+            .setPositiveButton("Create", (dialog, which) -> action.run(input.getText().toString()))
+            .setNegativeButton("Cancel", null).show();
+    }
+    private interface NameAction { void run(String name); }
+    private void confirmDelete(File file, Runnable after) {
+        new AlertDialog.Builder(this).setTitle("Delete " + file.getName() + "?")
+            .setMessage(file.isDirectory() ? "The folder and everything inside it will be deleted." : "This cannot be undone.")
+            .setPositiveButton("Delete", (dialog, which) -> {
+                try { store.delete(file); after.run(); } catch (Exception error) { toast(error); }
+            }).setNegativeButton("Cancel", null).show();
     }
 
     @Override public void onBackPressed() {
-        if (!snakeVisible) showSnake();
-        else super.onBackPressed();
+        if (opening) return;
+        if (running || runtimeView != null) { showProject(project); return; }
+        if (editorFile != null) { if (saveEditor()) showDirectory(directory); return; }
+        if (project != null) {
+            if (directory != null && !directory.equals(project)) showDirectory(directory.getParentFile());
+            else showProjects();
+            return;
+        }
+        super.onBackPressed();
     }
-
-    @Override protected void onPause() {
-        handler.removeCallbacksAndMessages(null);
-        super.onPause();
-    }
-
-    @Override protected void onResume() {
-        super.onResume();
-        if (snakeVisible && snake != null) snake.start();
-    }
-
     @Override protected void onDestroy() {
-        handler.removeCallbacksAndMessages(null);
-        if (nativeAvailable) {
-            try { nativeVulkanDestroy(); } catch (Throwable ignored) { }
-        }
+        stopRuntime();
+        if (nativeAvailable) try { nativeVulkanDestroy(); } catch (Throwable ignored) { }
         super.onDestroy();
-    }
-
-    private final class SnakeView extends View {
-        private static final int COLS = 20;
-        private static final int ROWS = 20;
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final ArrayList<Cell> cells = new ArrayList<>();
-        private final Random random = new Random();
-        private Cell food;
-        private int dx = 1, dy = 0;
-        private int queuedX = 1, queuedY = 0;
-        private boolean gameOver;
-        private int score;
-        private float downX, downY;
-
-        private final Runnable tick = new Runnable() {
-            @Override public void run() {
-                if (!snakeVisible) return;
-                step();
-                invalidate();
-                handler.postDelayed(this, gameOver ? 250 : Math.max(65, 145 - score * 2));
-            }
-        };
-
-        SnakeView(Context context) {
-            super(context);
-            paint.setTypeface(android.graphics.Typeface.MONOSPACE);
-            reset();
-        }
-
-        void start() {
-            handler.removeCallbacks(tick);
-            handler.post(tick);
-        }
-
-        private void reset() {
-            cells.clear();
-            cells.add(new Cell(10, 10));
-            cells.add(new Cell(9, 10));
-            cells.add(new Cell(8, 10));
-            dx = queuedX = 1;
-            dy = queuedY = 0;
-            score = 0;
-            gameOver = false;
-            placeFood();
-        }
-
-        void turn(int x, int y) {
-            if (gameOver) { reset(); return; }
-            if (x != -dx || y != -dy) { queuedX = x; queuedY = y; }
-        }
-
-        private void placeFood() {
-            if (cells.size() >= COLS * ROWS) return;
-            do { food = new Cell(random.nextInt(COLS), random.nextInt(ROWS)); }
-            while (cells.contains(food));
-        }
-
-        private void step() {
-            if (gameOver) return;
-            dx = queuedX; dy = queuedY;
-            Cell head = cells.get(0);
-            Cell next = new Cell(head.x + dx, head.y + dy);
-            if (next.x < 0 || next.x >= COLS || next.y < 0 || next.y >= ROWS) {
-                gameOver = true;
-                return;
-            }
-            boolean eating = next.equals(food);
-            int limit = eating ? cells.size() : cells.size() - 1;
-            for (int i = 0; i < limit; ++i) {
-                if (next.equals(cells.get(i))) { gameOver = true; return; }
-            }
-            cells.add(0, next);
-            if (eating) { score += 10; placeFood(); }
-            else cells.remove(cells.size() - 1);
-        }
-
-        @Override public boolean onTouchEvent(MotionEvent event) {
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                downX = event.getX(); downY = event.getY();
-                return true;
-            }
-            if (event.getAction() == MotionEvent.ACTION_UP) {
-                float x = event.getX() - downX;
-                float y = event.getY() - downY;
-                if (gameOver) reset();
-                else if (Math.abs(x) > 35 || Math.abs(y) > 35) {
-                    if (Math.abs(x) > Math.abs(y)) turn(x > 0 ? 1 : -1, 0);
-                    else turn(0, y > 0 ? 1 : -1);
-                }
-                performClick();
-                return true;
-            }
-            return true;
-        }
-
-        @Override public boolean performClick() {
-            super.performClick();
-            return true;
-        }
-
-        @Override protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            canvas.drawColor(Color.rgb(8, 15, 24));
-            float cellSize = Math.min(getWidth() / (float) COLS, getHeight() / (float) ROWS);
-            float offsetX = (getWidth() - cellSize * COLS) / 2;
-            float offsetY = (getHeight() - cellSize * ROWS) / 2;
-            paint.setTextAlign(Paint.Align.CENTER);
-            paint.setTextSize(Math.max(28, cellSize * 0.75f));
-            paint.setColor(Color.rgb(190, 210, 222));
-            canvas.drawText("SCORE  " + score, getWidth() / 2f, Math.max(34, offsetY - 10), paint);
-            paint.setColor(Color.rgb(15, 30, 41));
-            for (int i = 0; i <= COLS; ++i) {
-                float x = offsetX + i * cellSize;
-                canvas.drawLine(x, offsetY, x, offsetY + ROWS * cellSize, paint);
-            }
-            for (int i = 0; i <= ROWS; ++i) {
-                float y = offsetY + i * cellSize;
-                canvas.drawLine(offsetX, y, offsetX + COLS * cellSize, y, paint);
-            }
-            drawCell(canvas, food, offsetX, offsetY, cellSize, Color.rgb(255, 100, 115), true);
-            for (int i = cells.size() - 1; i >= 0; --i) {
-                int color = i == 0 ? Color.rgb(100, 245, 190) : Color.rgb(45, 185, 135);
-                drawCell(canvas, cells.get(i), offsetX, offsetY, cellSize, color, false);
-            }
-            if (gameOver) {
-                paint.setColor(Color.argb(215, 5, 8, 14));
-                canvas.drawRect(0, 0, getWidth(), getHeight(), paint);
-                paint.setColor(Color.rgb(255, 115, 130));
-                paint.setTextSize(Math.max(42, cellSize));
-                canvas.drawText("GAME OVER", getWidth() / 2f, getHeight() / 2f, paint);
-                paint.setColor(Color.WHITE);
-                paint.setTextSize(Math.max(28, cellSize * 0.65f));
-                canvas.drawText("Tap to restart", getWidth() / 2f, getHeight() / 2f + cellSize * 1.4f, paint);
-            }
-        }
-
-        private void drawCell(Canvas canvas, Cell cell, float ox, float oy, float size, int color, boolean round) {
-            float x = ox + cell.x * size;
-            float y = oy + cell.y * size;
-            float pad = Math.max(1, size * 0.07f);
-            paint.setColor(color);
-            canvas.drawRoundRect(x + pad, y + pad, x + size - pad, y + size - pad,
-                size * (round ? 0.45f : 0.18f), size * (round ? 0.45f : 0.18f), paint);
-        }
-    }
-
-    private static final class Cell {
-        final int x, y;
-        Cell(int x, int y) { this.x = x; this.y = y; }
-        @Override public boolean equals(Object other) {
-            return other instanceof Cell && ((Cell) other).x == x && ((Cell) other).y == y;
-        }
-        @Override public int hashCode() { return x * 31 + y; }
     }
 }

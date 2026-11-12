@@ -1,3 +1,7 @@
+#ifdef LUAC_EMBEDDED_RUNTIME
+/* Runtime feature-test macros must precede every system header on macOS. */
+#include "runtime.h"
+#endif
 #define _POSIX_C_SOURCE 200809L
 #include <ctype.h>
 #include <inttypes.h>
@@ -824,6 +828,10 @@ static void api_parse(Parser *p, const char *source, const char *filename, Stmt 
     *program = parse_block(p);
     if (p->token.kind != T_EOF) parse_error(p, "unexpected '%s'", token_name(p->token.kind));
 }
+
+#ifdef LUAC_EMBEDDED_RUNTIME
+#include "luac_interpreter.h"
+#endif
 
 LUAC_API char *luac_compile_c(const char *source, const char *filename, char **error_message) {
     Parser p;

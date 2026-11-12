@@ -99,10 +99,10 @@ gui: $(BUILD)/shader.vert.spv $(BUILD)/shader.frag.spv $(BUILD)/nuklear.o
 test: luac $(BUILD)/ui-test$(EXE) $(BUILD)/engine-test$(EXE)
 	./tests/run.sh
 
-install: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/third_party/miniaudio.h src/third_party/stb_image.h src/engine.hpp libraries
+install: src/luac.c src/luac.h src/runtime.h src/luac_interpreter.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/third_party/miniaudio.h src/third_party/stb_image.h src/engine.hpp libraries
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/share/luac
 	install -m644 src/runtime.h $(DESTDIR)$(PREFIX)/share/luac/runtime.h
-	install -m644 src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h $(DESTDIR)$(PREFIX)/share/luac/
+	install -m644 src/luac_interpreter.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h $(DESTDIR)$(PREFIX)/share/luac/
 	install -d $(DESTDIR)$(PREFIX)/share/luac/third_party
 	install -m644 src/third_party/miniaudio.h src/third_party/miniaudio-LICENSE src/third_party/stb_image.h src/third_party/stb_truetype.h src/third_party/stb-LICENSE $(DESTDIR)$(PREFIX)/share/luac/third_party/
 	install -m644 src/luac.h $(DESTDIR)$(PREFIX)/include/luac.h
