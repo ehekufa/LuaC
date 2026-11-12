@@ -819,11 +819,11 @@ int main(int argc,char**argv){
      {char *cresponse=NULL,*lresponse=NULL,*cresponse_arg=NULL,*lresponse_arg=NULL;size_t response_length=strlen(cfile)+12;
       if(extra_cflags.data&&*extra_cflags.data){
           FILE*file;cresponse=xmalloc(response_length);snprintf(cresponse,response_length,"%s.c.rsp",cfile);
-          file=fopen(cresponse,"wb");if(!file||fwrite(extra_cflags.data,1,extra_cflags.length,file)!=extra_cflags.length){if(file)fclose(file);fprintf(stderr,"luac: cannot write compiler response file\n");free(cresponse);free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}fclose(file);
+          file=fopen(cresponse,"wb");if(!file||fwrite(extra_cflags.data,1,extra_cflags.len,file)!=extra_cflags.len){if(file)fclose(file);fprintf(stderr,"luac: cannot write compiler response file\n");free(cresponse);free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}fclose(file);
           cresponse_arg=xmalloc(response_length+1);snprintf(cresponse_arg,response_length+1,"@%s",cresponse);}
       if(extra_ldflags.data&&*extra_ldflags.data){
           FILE*file;lresponse=xmalloc(response_length);snprintf(lresponse,response_length,"%s.link.rsp",cfile);
-          file=fopen(lresponse,"wb");if(!file||fwrite(extra_ldflags.data,1,extra_ldflags.length,file)!=extra_ldflags.length){if(file)fclose(file);fprintf(stderr,"luac: cannot write linker response file\n");if(cresponse){unlink(cresponse);free(cresponse);free(cresponse_arg);}free(lresponse);free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}fclose(file);
+          file=fopen(lresponse,"wb");if(!file||fwrite(extra_ldflags.data,1,extra_ldflags.len,file)!=extra_ldflags.len){if(file)fclose(file);fprintf(stderr,"luac: cannot write linker response file\n");if(cresponse){unlink(cresponse);free(cresponse);free(cresponse_arg);}free(lresponse);free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}fclose(file);
           lresponse_arg=xmalloc(response_length+1);snprintf(lresponse_arg,response_length+1,"@%s",lresponse);}
       if(mode==MODE_AOT)cr=(int)_spawnvp(_P_WAIT,cc,(const char *const[]){
           cc,"-std=gnu99","-O2","-DLUAC_STANDALONE",cresponse_arg,cfile,"-o",output,"-lm","-lws2_32",lresponse_arg,NULL});
