@@ -26,6 +26,13 @@ cmp tests/.tmp/libraries-expected.out tests/.tmp/libraries-jit.out
 tests/.tmp/libraries-aot > tests/.tmp/libraries-aot.out
 cmp tests/.tmp/libraries-expected.out tests/.tmp/libraries-aot.out
 
+./luac tests/audio.lua > tests/.tmp/audio-jit.out
+printf '%s\n' 'LuaC native audio: OK' > tests/.tmp/audio-expected.out
+cmp tests/.tmp/audio-expected.out tests/.tmp/audio-jit.out
+./luac --aot tests/audio.lua -o tests/.tmp/audio-aot >/dev/null
+tests/.tmp/audio-aot > tests/.tmp/audio-aot.out
+cmp tests/.tmp/audio-expected.out tests/.tmp/audio-aot.out
+
 make libraries >/dev/null
 cc -std=c99 -Isrc tests/api_test.c build/libluac.a -o tests/.tmp/api-test
 tests/.tmp/api-test
@@ -35,6 +42,7 @@ tests/.tmp/api-test
 ./luac --emit-c examples/demo.lua -o tests/.tmp/demo.c >/dev/null
 ./luac --emit-c tests/compat.lua -o tests/.tmp/compat.c >/dev/null
 ./luac --emit-c tests/libraries.lua -o tests/.tmp/libraries.c >/dev/null
+./luac --emit-c tests/audio.lua -o tests/.tmp/audio.c >/dev/null
 grep -q 'lc_jit_main' tests/.tmp/demo.c
 grep -q 'LC_RELEASE' tests/.tmp/demo.c
 
@@ -56,6 +64,10 @@ if [ "${SANITIZE:-0}" = 1 ]; then
     -fno-omit-frame-pointer -DLUAC_STANDALONE \
     tests/.tmp/libraries.c -o tests/.tmp/libraries-sanitize -lm
   ASAN_OPTIONS=detect_leaks=1 tests/.tmp/libraries-sanitize >/dev/null
+  cc -std=gnu99 -O1 -g -fsanitize=address,undefined \
+    -fno-omit-frame-pointer -DLUAC_STANDALONE \
+    tests/.tmp/audio.c -o tests/.tmp/audio-sanitize -lm
+  ASAN_OPTIONS=detect_leaks=1 tests/.tmp/audio-sanitize >/dev/null
 fi
 
 echo 'JIT, AOT, C generation and diagnostics: OK'

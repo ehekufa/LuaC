@@ -8,6 +8,30 @@ WARNINGS = -Wall -Wextra -Wno-unused-parameter -Wno-unused-function
 RUNTIME_PATH = $(abspath src/runtime.h)
 BUILD = build
 DL_LIBS =
+MBEDTLS ?= 0
+MINIAUDIO ?= 0
+NATIVE_CFLAGS =
+NATIVE_LDFLAGS =
+ifeq ($(MBEDTLS),1)
+  NATIVE_CFLAGS += -DLUAC_WITH_MBEDTLS $(MBEDTLS_CFLAGS) $(shell pkg-config --cflags mbedtls 2>/dev/null)
+  NATIVE_LDFLAGS += $(MBEDTLS_LDFLAGS) $(shell pkg-config --libs mbedtls 2>/dev/null)
+  ifeq ($(strip $(shell pkg-config --libs mbedtls 2>/dev/null)),)
+    NATIVE_LDFLAGS += -lmbedtls -lmbedx509 -lmbedcrypto
+  endif
+  ifeq ($(OS),Windows_NT)
+    NATIVE_LDFLAGS += -lcrypt32
+  endif
+  ifneq ($(findstring MINGW,$(UNAME_S)),)
+    NATIVE_LDFLAGS += -lcrypt32
+  endif
+endif
+ifeq ($(MINIAUDIO),1)
+  NATIVE_CFLAGS += -DLUAC_WITH_MINIAUDIO
+  NATIVE_LDFLAGS += -pthread
+  ifneq ($(OS),Windows_NT)
+    NATIVE_LDFLAGS += -ldl
+  endif
+endif
 SHARED_EXT = so
 SHARED_FLAG = -shared
 GUI_LIBS = $(shell pkg-config --libs glfw3 vulkan 2>/dev/null)
@@ -33,13 +57,13 @@ endif
 .PHONY: all clean test install libraries gui android-check
 all: luac
 
-luac: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h
-	$(CC) -std=gnu99 $(CFLAGS) $(WARNINGS) -DLUAC_RUNTIME_PATH=\"$(RUNTIME_PATH)\" src/luac.c -o $@ $(DL_LIBS)
+luac: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h src/luac_tls.h src/luac_audio.h src/third_party/miniaudio.h
+	$(CC) -std=gnu99 $(CFLAGS) $(WARNINGS) -DLUAC_RUNTIME_PATH=\"$(RUNTIME_PATH)\" '-DLUAC_DEFAULT_CFLAGS="$(NATIVE_CFLAGS)"' '-DLUAC_DEFAULT_LDFLAGS="$(NATIVE_LDFLAGS)"' src/luac.c -o $@ $(DL_LIBS)
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/luac.o: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h | $(BUILD)
+$(BUILD)/luac.o: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h src/luac_tls.h src/luac_audio.h src/third_party/miniaudio.h | $(BUILD)
 	$(CC) -std=gnu99 $(CFLAGS) $(WARNINGS) -fPIC -DLUAC_LIBRARY_ONLY -DLUAC_BUILD_SHARED -DLUAC_RUNTIME_PATH=\"$(RUNTIME_PATH)\" -c src/luac.c -o $@
 
 libraries: $(BUILD)/libluac.a $(BUILD)/libluac.$(SHARED_EXT)
@@ -72,15 +96,17 @@ gui: $(BUILD)/shader.vert.spv $(BUILD)/shader.frag.spv $(BUILD)/nuklear.o
 test: luac $(BUILD)/ui-test$(EXE) $(BUILD)/engine-test$(EXE)
 	./tests/run.sh
 
-install: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h src/engine.hpp libraries
+install: src/luac.c src/luac.h src/runtime.h src/luac_libraries.h src/luac_tls.h src/luac_audio.h src/third_party/miniaudio.h src/engine.hpp libraries
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib $(DESTDIR)$(PREFIX)/share/luac
 	install -m644 src/runtime.h $(DESTDIR)$(PREFIX)/share/luac/runtime.h
-	install -m644 src/luac_libraries.h $(DESTDIR)$(PREFIX)/share/luac/luac_libraries.h
+	install -m644 src/luac_libraries.h src/luac_tls.h src/luac_audio.h $(DESTDIR)$(PREFIX)/share/luac/
+	install -d $(DESTDIR)$(PREFIX)/share/luac/third_party
+	install -m644 src/third_party/miniaudio.h src/third_party/miniaudio-LICENSE $(DESTDIR)$(PREFIX)/share/luac/third_party/
 	install -m644 src/luac.h $(DESTDIR)$(PREFIX)/include/luac.h
 	install -m644 src/engine.hpp $(DESTDIR)$(PREFIX)/include/engine.hpp
 	install -m644 $(BUILD)/libluac.a $(DESTDIR)$(PREFIX)/lib/libluac.a
 	install -m755 $(BUILD)/libluac.$(SHARED_EXT) $(DESTDIR)$(PREFIX)/lib/libluac.$(SHARED_EXT)
-	$(CC) -std=gnu99 $(CFLAGS) $(WARNINGS) -DLUAC_RUNTIME_PATH=\"$(PREFIX)/share/luac/runtime.h\" src/luac.c -o $(DESTDIR)$(PREFIX)/bin/luac $(DL_LIBS)
+	$(CC) -std=gnu99 $(CFLAGS) $(WARNINGS) -DLUAC_RUNTIME_PATH=\"$(PREFIX)/share/luac/runtime.h\" '-DLUAC_DEFAULT_CFLAGS="$(NATIVE_CFLAGS)"' '-DLUAC_DEFAULT_LDFLAGS="$(NATIVE_LDFLAGS)"' src/luac.c -o $(DESTDIR)$(PREFIX)/bin/luac $(DL_LIBS)
 
 clean:
 	rm -f luac luac.exe a.luac.c

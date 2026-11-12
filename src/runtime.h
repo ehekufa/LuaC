@@ -46,9 +46,10 @@ typedef struct LcTuple LcTuple;
 typedef struct LcCell LcCell;
 typedef struct LcFile LcFile;
 typedef struct LcSocket LcSocket;
+typedef struct LcAudio LcAudio;
 
 typedef enum {
-    LC_NIL = 0, LC_BOOL, LC_NUMBER, LC_STRING, LC_TABLE, LC_FUNCTION, LC_TUPLE, LC_FILE, LC_SOCKET
+    LC_NIL = 0, LC_BOOL, LC_NUMBER, LC_STRING, LC_TABLE, LC_FUNCTION, LC_TUPLE, LC_FILE, LC_SOCKET, LC_AUDIO
 } LcType;
 
 typedef struct LcValue {
@@ -62,6 +63,7 @@ typedef struct LcValue {
         LcTuple *tuple;
         LcFile *file;
         LcSocket *socket;
+        LcAudio *audio;
     } as;
 } LcValue;
 
@@ -117,6 +119,16 @@ struct LcSocket {
     int timeout_ms;
 };
 
+struct LcAudio {
+    LcObject object;
+    int channels;
+    int sample_rate;
+    size_t frames;
+    size_t cursor;
+    void *device;
+    float *samples; /* interleaved, normalized to [-1, 1] */
+};
+
 struct LcTuple {
     LcObject object;
     int count;
@@ -134,8 +146,11 @@ struct LcContext {
     LcValue string_library; /* Context-owned default __index for strings. */
     LcValue file_methods;
     LcValue socket_methods;
+    LcValue audio_methods;
     LcValue input, output, error_output;
     int socket_initialized;
+    char tls_ca_file[4096];
+    int tls_verify;
     int error;
     int line;
     const char *source;
@@ -175,6 +190,7 @@ static LcObject *lc_value_object(LcValue v) {
         case LC_TUPLE: return (LcObject *)v.as.tuple;
         case LC_FILE: return (LcObject *)v.as.file;
         case LC_SOCKET: return (LcObject *)v.as.socket;
+        case LC_AUDIO: return (LcObject *)v.as.audio;
         default: return NULL;
     }
 }
@@ -187,6 +203,7 @@ static LcValue lc_retain(LcValue v) {
 
 static void lc_release(LcContext *ctx, LcValue v);
 
+static void lc_audio_dispose(LcAudio *audio);
 static void lc_socket_close_handle(LcSocket *socket) {
     if (!socket || socket->closed) return;
 #ifdef _WIN32
@@ -240,6 +257,10 @@ static void lc_free_value(LcContext *ctx, LcValue v) {
             break;
         case LC_SOCKET:
             lc_socket_close_handle(v.as.socket);
+            break;
+        case LC_AUDIO:
+            lc_audio_dispose(v.as.audio);
+            free(v.as.audio->samples);
             break;
         default: break;
     }
@@ -356,6 +377,7 @@ static int lc_value_equal(LcValue a, LcValue b) {
         case LC_FUNCTION: return a.as.function == b.as.function;
         case LC_FILE: return a.as.file == b.as.file;
         case LC_SOCKET: return a.as.socket == b.as.socket;
+        case LC_AUDIO: return a.as.audio == b.as.audio;
         default: return 0;
     }
 }
@@ -446,6 +468,9 @@ static LcValue lc_table_get(LcContext *ctx, LcValue table, LcValue key) {
         }
         if (current.type == LC_SOCKET && ctx->socket_methods.type == LC_TABLE) {
             result = lc_table_raw_get(ctx, ctx->socket_methods, key); lc_release(ctx, current); return result;
+        }
+        if (current.type == LC_AUDIO && ctx->audio_methods.type == LC_TABLE) {
+            result = lc_table_raw_get(ctx, ctx->audio_methods, key); lc_release(ctx, current); return result;
         }
         if (current.type != LC_TABLE) break;
         result = lc_table_raw_get(ctx, current, key);
@@ -628,6 +653,9 @@ static LcValue lc_to_string(LcContext *ctx, LcValue v) {
             if (v.as.file->closed) return lc_string(ctx, "file (closed)");
             snprintf(buf, sizeof(buf), "file (%p)", (void *)v.as.file);
             return lc_string(ctx, buf);
+        case LC_AUDIO:
+            snprintf(buf, sizeof(buf), "audio: %p", (void *)v.as.audio);
+            return lc_string(ctx, buf);
         case LC_SOCKET:
             if (v.as.socket->closed) return lc_string(ctx, "socket (closed)");
             snprintf(buf, sizeof(buf), "socket (%p)", (void *)v.as.socket);
@@ -637,7 +665,7 @@ static LcValue lc_to_string(LcContext *ctx, LcValue v) {
 }
 
 static const char *lc_type_name(LcValue v) {
-    static const char *names[] = {"nil", "boolean", "number", "string", "table", "function", "tuple", "userdata", "userdata"};
+    static const char *names[] = {"nil", "boolean", "number", "string", "table", "function", "tuple", "userdata", "userdata", "userdata"};
     v = lc_first_value(v);
     return names[(int)v.type];
 }
@@ -2253,7 +2281,9 @@ static void lc_add_native(LcContext *ctx, LcValue table, const char *name, LcNat
     lc_set_field(ctx, table, name, lc_function_new(ctx, fn, 0, NULL, name));
 }
 
+static void lc_audio_init(LcContext *ctx);
 #include "luac_libraries.h"
+#include "luac_audio.h"
 
 static LcContext *lc_context_new(const char *source) {
     LcContext *ctx = (LcContext *)calloc(1, sizeof(*ctx));
@@ -2262,6 +2292,7 @@ static LcContext *lc_context_new(const char *source) {
     int i;
     if (!ctx) return NULL;
     ctx->source = source;
+    ctx->tls_verify = 1;
     ctx->globals = lc_table(ctx);
     lc_set_global(ctx, "print", lc_function_new(ctx, lc_builtin_print, 0, NULL, "print"));
     lc_set_global(ctx, "type", lc_function_new(ctx, lc_builtin_type, 0, NULL, "type"));
@@ -2390,6 +2421,7 @@ static void lc_context_destroy(LcContext *ctx) {
             file->closed = 1;
         }
         else if (o->kind == LC_SOCKET) lc_socket_close_handle((LcSocket *)o);
+        else if (o->kind == LC_AUDIO) { lc_audio_dispose((LcAudio *)o); free(((LcAudio *)o)->samples); }
         free(o); o = next;
     }
 #ifdef _WIN32

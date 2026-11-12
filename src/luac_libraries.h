@@ -786,29 +786,164 @@ static LcValue lc_socket_select(LcContext *ctx,LcFunction *self,int argc,LcValue
 static LcValue lc_socket_quick(LcContext *ctx,LcFunction *self,int argc,LcValue *argv){LcValue args[4],value;int server=!strcmp(lc_lib_name(self),"bind");args[0]=lc_socket_create(ctx,self,0,NULL);if(lc_first_value(args[0]).type!=LC_SOCKET)return args[0];args[1]=argv[0];args[2]=argv[1];value=server?lc_socket_bind(ctx,self,3,args):lc_socket_connect(ctx,self,3,args);if(lc_first_value(value).type==LC_NIL){lc_release(ctx,args[0]);return value;}lc_release(ctx,value);if(server){args[1]=lc_number(32);value=lc_socket_listen(ctx,self,2,args);lc_release(ctx,args[1]);if(lc_first_value(value).type==LC_NIL){lc_release(ctx,args[0]);return value;}lc_release(ctx,value);}return args[0];}
 
 /* -------------------------------- HTTP ---------------------------------- */
+#include "luac_tls.h"
 static int lc_http_dechunk(LcContext *ctx,LcLibBuffer *body){LcLibBuffer decoded={0};size_t position=0;while(position<body->length){char *end;unsigned long size=strtoul(body->data+position,&end,16);const char *line=strstr(body->data+position,"\r\n");if(!line||end>line){free(decoded.data);return 0;}position=(size_t)(line-body->data)+2;if(size==0)break;if(size>body->length-position){free(decoded.data);return 0;}lc_lib_append(ctx,&decoded,body->data+position,size);position+=size;if(position+2>body->length||memcmp(body->data+position,"\r\n",2)){free(decoded.data);return 0;}position+=2;}free(body->data);*body=decoded;return 1;}
-static LcValue lc_http_request(LcContext *ctx,LcFunction *self,int argc,LcValue *argv){
-    LcString *url=lc_lib_string_arg(ctx,argc,argv,0);const char *method="GET",*body=NULL,*host_start,*host_end,*path,*colon;size_t body_length=0,host_length;int port=80;char port_text[16],host[256];struct addrinfo *addresses=NULL,*at;LcOsSocket handle=LC_INVALID_SOCKET;LcLibBuffer request={0},response={0},content={0},headers_text={0};LcValue headers,result,out[3];char buffer[8192];int status=0,chunked=0;const char *header_end;
-    if(!url)return lc_nil();if(argc>1&&lc_first_value(argv[1]).type==LC_STRING)method=lc_first_value(argv[1]).as.string->data;else if(!strcmp(lc_lib_name(self),"post"))method="POST";
-    if(argc>2&&lc_first_value(argv[2]).type==LC_STRING){body=lc_first_value(argv[2]).as.string->data;body_length=lc_first_value(argv[2]).as.string->length;}
-    if(strncmp(url->data,"http://",7)){LcValue error[2];error[0]=lc_nil();error[1]=lc_string(ctx,"only plain http:// URLs are supported; HTTPS requires a TLS backend");return lc_tuple_new(ctx,2,error,1);}host_start=url->data+7;host_end=host_start+strcspn(host_start,"/");path=*host_end?host_end:"/";colon=memchr(host_start,':',(size_t)(host_end-host_start));if(colon){port=atoi(colon+1);host_length=(size_t)(colon-host_start);}else host_length=(size_t)(host_end-host_start);if(host_length>=sizeof(host)){lc_error(ctx,"HTTP host too long");return lc_nil();}memcpy(host,host_start,host_length);host[host_length]=0;snprintf(port_text,sizeof(port_text),"%d",port);
-    if(!lc_socket_startup(ctx))return lc_nil();if(!lc_socket_lookup(ctx,host,port_text,SOCK_STREAM,0,&addresses))return lc_nil();for(at=addresses;at;at=at->ai_next){handle=socket(at->ai_family,at->ai_socktype,at->ai_protocol);if(handle!=LC_INVALID_SOCKET&&connect(handle,at->ai_addr,(int)at->ai_addrlen)==0)break;if(handle!=LC_INVALID_SOCKET){
+static LcValue lc_http_request(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    LcString *url = lc_lib_string_arg(ctx, argc, argv, 0);
+    const char *method = "GET", *body = NULL, *host_start, *host_end, *path, *colon;
+    size_t body_length = 0, host_length;
+    int port, secure = 0, status = 0, chunked = 0;
+    char port_text[16], host[256], buffer[8192];
+    struct addrinfo *addresses = NULL, *at;
+    LcOsSocket handle = LC_INVALID_SOCKET;
+    LcLibBuffer request = {0}, response = {0}, content = {0}, headers_text = {0}, target = {0};
+    LcValue headers, result, out[3];
+    const char *header_end;
+    LcTls tls;
+    memset(&tls, 0, sizeof(tls));
+    if (!url) return lc_nil();
+    if (argc > 1 && lc_first_value(argv[1]).type == LC_STRING) method = lc_first_value(argv[1]).as.string->data;
+    else if (!strcmp(lc_lib_name(self), "post")) method = "POST";
+    if (argc > 2 && lc_first_value(argv[2]).type == LC_STRING) {
+        body = lc_first_value(argv[2]).as.string->data;
+        body_length = lc_first_value(argv[2]).as.string->length;
+    }
+    if (!strncmp(url->data, "https://", 8)) { secure = 1; host_start = url->data + 8; port = 443; }
+    else if (!strncmp(url->data, "http://", 7)) { host_start = url->data + 7; port = 80; }
+    else {
+        LcValue error[2]; error[0] = lc_nil(); error[1] = lc_string(ctx, "URL must start with http:// or https://");
+        return lc_tuple_new(ctx, 2, error, 1);
+    }
+    host_end = host_start + strcspn(host_start, "/?#");
+    path = *host_end ? host_end : "/";
+    colon = memchr(host_start, ':', (size_t)(host_end - host_start));
+    if (colon) { port = atoi(colon + 1); host_length = (size_t)(colon - host_start); }
+    else host_length = (size_t)(host_end - host_start);
+    if (!host_length || host_length >= sizeof(host)) {
+        snprintf(tls.error, sizeof(tls.error), "invalid HTTP host"); return lc_tls_failure(ctx, &tls);
+    }
+    memcpy(host, host_start, host_length); host[host_length] = 0;
+    if (*path == '?') { lc_lib_putc(ctx, &target, '/'); }
+    lc_lib_puts(ctx, &target, path);
+    snprintf(port_text, sizeof(port_text), "%d", port);
+    if (!lc_socket_startup(ctx)) { free(target.data); return lc_nil(); }
+    { struct addrinfo hints; int lookup;
+      memset(&hints, 0, sizeof(hints)); hints.ai_family = AF_UNSPEC; hints.ai_socktype = SOCK_STREAM;
+      lookup = getaddrinfo(host, port_text, &hints, &addresses);
+      if (lookup != 0) { snprintf(tls.error, sizeof(tls.error), "HTTP address resolution: %s", gai_strerror(lookup));
+        free(target.data); return lc_tls_failure(ctx, &tls); } }
+    for (at = addresses; at; at = at->ai_next) {
+        handle = socket(at->ai_family, at->ai_socktype, at->ai_protocol);
+        if (handle != LC_INVALID_SOCKET && connect(handle, at->ai_addr, (int)at->ai_addrlen) == 0) break;
+        if (handle != LC_INVALID_SOCKET) {
+#ifdef _WIN32
+            closesocket(handle);
+#else
+            close(handle);
+#endif
+            handle = LC_INVALID_SOCKET;
+        }
+    }
+    freeaddrinfo(addresses);
+    if (handle == LC_INVALID_SOCKET) { free(target.data); return lc_socket_error(ctx, "HTTP connect"); }
+    if (secure && lc_tls_start(ctx, &tls, &handle, host) != 0) {
 #ifdef _WIN32
         closesocket(handle);
 #else
         close(handle);
 #endif
-        handle=LC_INVALID_SOCKET;}}freeaddrinfo(addresses);if(handle==LC_INVALID_SOCKET)return lc_socket_error(ctx,"HTTP connect");
-    lc_lib_printf(ctx,&request,"%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: LuaC/0.4\r\nAccept: */*\r\nConnection: close\r\n",method,path,host);if(body){lc_lib_printf(ctx,&request,"Content-Length: %d\r\n",(int)body_length);if(argc>3&&lc_first_value(argv[3]).type==LC_STRING)lc_lib_printf(ctx,&request,"Content-Type: %s\r\n",lc_first_value(argv[3]).as.string->data);}lc_lib_puts(ctx,&request,"\r\n");if(body)lc_lib_append(ctx,&request,body,body_length);
-    {size_t sent=0;while(sent<request.length){int n=send(handle,request.data+sent,(int)(request.length-sent),0);if(n<=0)break;sent+=(size_t)n;}}free(request.data);for(;;){int n=recv(handle,buffer,sizeof(buffer),0);if(n<=0)break;lc_lib_append(ctx,&response,buffer,(size_t)n);}
+        free(target.data); return lc_tls_failure(ctx, &tls);
+    }
+    lc_lib_printf(ctx, &request, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: LuaC/0.5\r\nAccept: */*\r\nConnection: close\r\n",
+                  method, target.data ? target.data : "/", host);
+    free(target.data);
+    if (body) {
+        lc_lib_printf(ctx, &request, "Content-Length: %d\r\n", (int)body_length);
+        if (argc > 3 && lc_first_value(argv[3]).type == LC_STRING)
+            lc_lib_printf(ctx, &request, "Content-Type: %s\r\n", lc_first_value(argv[3]).as.string->data);
+    }
+    lc_lib_puts(ctx, &request, "\r\n");
+    if (body) lc_lib_append(ctx, &request, body, body_length);
+    {
+        size_t sent = 0; int failed = 0;
+        while (sent < request.length) {
+            int n = secure ? lc_tls_write(&tls, request.data + sent, request.length - sent)
+                           : send(handle, request.data + sent, (int)(request.length - sent), 0);
+            if (n <= 0) { failed = 1; break; }
+            sent += (size_t)n;
+        }
+        free(request.data);
+        if (failed) {
+            if (secure) lc_tls_cleanup(&tls);
+#ifdef _WIN32
+            closesocket(handle);
+#else
+            close(handle);
+#endif
+            return secure ? lc_tls_failure(ctx, &tls) : lc_socket_error(ctx, "HTTP write");
+        }
+    }
+    for (;;) {
+        int n = secure ? lc_tls_read(&tls, buffer, sizeof(buffer)) : recv(handle, buffer, sizeof(buffer), 0);
+        if (n <= 0) break;
+        lc_lib_append(ctx, &response, buffer, (size_t)n);
+    }
+    if (secure) lc_tls_cleanup(&tls);
 #ifdef _WIN32
     closesocket(handle);
 #else
     close(handle);
 #endif
-    header_end=strstr(response.data?response.data:"","\r\n\r\n");if(!header_end||sscanf(response.data,"HTTP/%*s %d",&status)!=1){free(response.data);return lc_socket_error(ctx,"invalid HTTP response");}lc_lib_append(ctx,&headers_text,response.data,(size_t)(header_end-response.data));lc_lib_append(ctx,&content,header_end+4,response.length-(size_t)(header_end+4-response.data));
-    {const char *line=strstr(headers_text.data,"\r\n");headers=lc_table(ctx);while(line){const char *next=strstr(line+2,"\r\n"),*end=next?next:headers_text.data+headers_text.length,*separator=memchr(line+2,':',(size_t)(end-line-2));if(separator){LcValue name=lc_string_n(ctx,line+2,(size_t)(separator-line-2)),value;const char *v=separator+1;while(v<end&&*v==' ')++v;value=lc_string_n(ctx,v,(size_t)(end-v));if(name.type==LC_STRING){size_t i;for(i=0;i<name.as.string->length;++i)name.as.string->data[i]=(char)tolower((unsigned char)name.as.string->data[i]);if(!strcmp(name.as.string->data,"transfer-encoding")&&value.type==LC_STRING&&strstr(value.as.string->data,"chunked"))chunked=1;}lc_table_raw_set(ctx,headers,name,value);lc_release(ctx,name);lc_release(ctx,value);}line=next;}}
-    free(headers_text.data);free(response.data);if(chunked&&!lc_http_dechunk(ctx,&content)){lc_release(ctx,headers);free(content.data);lc_error(ctx,"invalid chunked HTTP response");return lc_nil();}out[0]=lc_lib_buffer_value(ctx,&content);out[1]=lc_number(status);out[2]=headers;result=lc_tuple_new(ctx,3,out,1);return result;
+    header_end = strstr(response.data ? response.data : "", "\r\n\r\n");
+    if (!header_end || sscanf(response.data, "HTTP/%*s %d", &status) != 1) {
+        free(response.data); return lc_socket_error(ctx, "invalid HTTP response");
+    }
+    lc_lib_append(ctx, &headers_text, response.data, (size_t)(header_end - response.data));
+    lc_lib_append(ctx, &content, header_end + 4, response.length - (size_t)(header_end + 4 - response.data));
+    {
+        const char *line = strstr(headers_text.data, "\r\n");
+        headers = lc_table(ctx);
+        while (line) {
+            const char *next = strstr(line + 2, "\r\n"), *end = next ? next : headers_text.data + headers_text.length;
+            const char *separator = memchr(line + 2, ':', (size_t)(end - line - 2));
+            if (separator) {
+                LcValue name = lc_string_n(ctx, line + 2, (size_t)(separator - line - 2)), value;
+                const char *v = separator + 1;
+                while (v < end && *v == ' ') ++v;
+                value = lc_string_n(ctx, v, (size_t)(end - v));
+                if (name.type == LC_STRING) {
+                    size_t i;
+                    for (i = 0; i < name.as.string->length; ++i) name.as.string->data[i] = (char)tolower((unsigned char)name.as.string->data[i]);
+                    if (!strcmp(name.as.string->data, "transfer-encoding") && value.type == LC_STRING && strstr(value.as.string->data, "chunked")) chunked = 1;
+                }
+                lc_table_raw_set(ctx, headers, name, value); lc_release(ctx, name); lc_release(ctx, value);
+            }
+            line = next;
+        }
+    }
+    free(headers_text.data); free(response.data);
+    if (chunked && !lc_http_dechunk(ctx, &content)) {
+        lc_release(ctx, headers); free(content.data); lc_error(ctx, "invalid chunked HTTP response"); return lc_nil();
+    }
+    out[0] = lc_lib_buffer_value(ctx, &content); out[1] = lc_number(status); out[2] = headers;
+    result = lc_tuple_new(ctx, 3, out, 1); return result;
+}
+static LcValue lc_http_tls_available(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    (void)self; (void)argc; (void)argv;
+#ifdef LUAC_WITH_MBEDTLS
+    return lc_bool(1);
+#else
+    return lc_bool(0);
+#endif
+}
+static LcValue lc_http_setca(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    LcString *path = lc_lib_string_arg(ctx, argc, argv, 0); (void)self;
+    if (!path) return lc_nil();
+    if (path->length >= sizeof(ctx->tls_ca_file)) { lc_error(ctx, "CA path too long"); return lc_nil(); }
+    memcpy(ctx->tls_ca_file, path->data, path->length + 1); return lc_bool(1);
+}
+static LcValue lc_http_setverify(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    (void)self; ctx->tls_verify = argc < 1 || lc_truthy(lc_first_value(argv[0])); return lc_bool(ctx->tls_verify);
 }
 static LcValue lc_http_get(LcContext *ctx,LcFunction *self,int argc,LcValue *argv){LcValue args[4];args[0]=argv[0];args[1]=lc_string(ctx,"GET");args[2]=lc_nil();args[3]=lc_nil();{LcValue result=lc_http_request(ctx,self,4,args);lc_release(ctx,args[1]);return result;}}
 static LcValue lc_http_post(LcContext *ctx,LcFunction *self,int argc,LcValue *argv){LcValue args[4];args[0]=argv[0];args[1]=lc_string(ctx,"POST");args[2]=argc>1?argv[1]:lc_string(ctx,"");args[3]=argc>2?argv[2]:lc_string(ctx,"application/octet-stream");{LcValue result=lc_http_request(ctx,self,4,args);lc_release(ctx,args[1]);if(argc<=1)lc_release(ctx,args[2]);if(argc<=2)lc_release(ctx,args[3]);return result;}}
@@ -881,8 +1016,9 @@ static void lc_register_libraries(LcContext *ctx) {
     for(i=0;binary_vec[i];++i)lc_add_native(ctx,vec,binary_vec[i],lc_vec_binary);for(i=0;unary_vec[i];++i)lc_add_native(ctx,vec,unary_vec[i],lc_vec_unary);lc_lib_register(ctx,"vec",vec);
     lc_add_native(ctx,net,"tcp",lc_socket_create);lc_add_native(ctx,net,"udp",lc_socket_create);lc_add_native(ctx,net,"connect",lc_socket_quick);lc_add_native(ctx,net,"bind",lc_socket_quick);lc_add_native(ctx,net,"select",lc_socket_select);lc_add_native(ctx,net,"resolve",lc_socket_resolve);lc_add_native(ctx,net,"addresses",lc_socket_resolve);lc_add_native(ctx,net,"gethostname",lc_socket_hostname);
     ctx->socket_methods=lc_table(ctx);lc_add_native(ctx,ctx->socket_methods,"connect",lc_socket_connect);lc_add_native(ctx,ctx->socket_methods,"bind",lc_socket_bind);lc_add_native(ctx,ctx->socket_methods,"listen",lc_socket_listen);lc_add_native(ctx,ctx->socket_methods,"accept",lc_socket_accept);lc_add_native(ctx,ctx->socket_methods,"send",lc_socket_send);lc_add_native(ctx,ctx->socket_methods,"receive",lc_socket_receive);lc_add_native(ctx,ctx->socket_methods,"recv",lc_socket_receive);lc_add_native(ctx,ctx->socket_methods,"sendto",lc_socket_sendto);lc_add_native(ctx,ctx->socket_methods,"receivefrom",lc_socket_recvfrom);lc_add_native(ctx,ctx->socket_methods,"recvfrom",lc_socket_recvfrom);lc_add_native(ctx,ctx->socket_methods,"close",lc_socket_close);lc_add_native(ctx,ctx->socket_methods,"settimeout",lc_socket_timeout);lc_add_native(ctx,ctx->socket_methods,"setoption",lc_socket_option);lc_add_native(ctx,ctx->socket_methods,"getsockname",lc_socket_name);lc_add_native(ctx,ctx->socket_methods,"getpeername",lc_socket_name);lc_add_native(ctx,ctx->socket_methods,"shutdown",lc_socket_shutdown);lc_lib_register(ctx,"socket",lc_retain(net));lc_lib_register(ctx,"net",net);
-    lc_add_native(ctx,http,"request",lc_http_request);lc_add_native(ctx,http,"get",lc_http_get);lc_add_native(ctx,http,"post",lc_http_post);lc_lib_register(ctx,"http",http);
+    lc_add_native(ctx,http,"request",lc_http_request);lc_add_native(ctx,http,"get",lc_http_get);lc_add_native(ctx,http,"post",lc_http_post);lc_add_native(ctx,http,"tls_available",lc_http_tls_available);lc_add_native(ctx,http,"setca",lc_http_setca);lc_add_native(ctx,http,"setverify",lc_http_setverify);lc_lib_register(ctx,"http",http);
     lc_add_native(ctx,engine,"world",lc_engine_world_new);lc_add_native(ctx,engine,"create",lc_engine_create);lc_add_native(ctx,engine,"entity",lc_engine_create);lc_add_native(ctx,engine,"find",lc_engine_find);lc_add_native(ctx,engine,"destroy",lc_engine_destroy);lc_add_native(ctx,engine,"list",lc_engine_list);lc_add_native(ctx,engine,"ids",lc_engine_list);lc_add_native(ctx,engine,"count",lc_engine_count);lc_add_native(ctx,engine,"clear",lc_engine_clear);lc_add_native(ctx,engine,"update",lc_engine_update);lc_add_native(ctx,engine,"pause",lc_engine_running);lc_add_native(ctx,engine,"resume",lc_engine_running);lc_add_native(ctx,engine,"intersects",lc_engine_intersects);lc_add_native(ctx,engine,"collisions",lc_engine_collisions);lc_add_native(ctx,engine,"bounds",lc_engine_bounds);lc_add_native(ctx,engine,"set_color",lc_engine_color);lc_add_native(ctx,engine,"add_component",lc_engine_component);lc_add_native(ctx,engine,"get_component",lc_engine_component);lc_add_native(ctx,engine,"remove_component",lc_engine_component);lc_add_native(ctx,engine,"add_tag",lc_engine_tag);lc_add_native(ctx,engine,"remove_tag",lc_engine_tag);lc_add_native(ctx,engine,"has_tag",lc_engine_tag);lc_add_native(ctx,engine,"camera",lc_engine_camera);lc_add_native(ctx,engine,"world_to_screen",lc_engine_project);lc_add_native(ctx,engine,"screen_to_world",lc_engine_project);
     {const char *mutations[]={"set_position","set_velocity","set_size","translate","set_rotation","rotate","set_scale","set_angular_velocity","set_active",NULL};for(i=0;mutations[i];++i)lc_add_native(ctx,engine,mutations[i],lc_engine_mutate);}lc_lib_register(ctx,"engine",engine);
+    lc_audio_init(ctx);
 }
 #endif

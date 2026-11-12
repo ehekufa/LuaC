@@ -32,7 +32,35 @@ AOT-сборка:
 ./luac --emit-c program.lua -o program.c  # посмотреть результат компиляции
 ./luac --keep-c generated.c program.lua   # JIT, сохранив промежуточный C
 ./luac --cc clang program.lua             # выбрать C-компилятор
+./luac --cflags "-DMY_DEFINE" --ldflags "-lmylib" program.lua
 ```
+
+## HTTPS и native audio
+
+Базовая сборка не требует внешних libraries. HTTPS включается установленным **mbedTLS 3.x**, playback — bundled **miniaudio 0.11.26**:
+
+```sh
+# Debian/Ubuntu: sudo apt install libmbedtls-dev
+make MBEDTLS=1 MINIAUDIO=1
+./luac examples/https.lua
+./luac examples/audio.lua
+
+# Эквивалентная CMake конфигурация:
+cmake -S . -B build -DLUAC_WITH_MBEDTLS=ON -DLUAC_WITH_MINIAUDIO=ON
+cmake --build build -j2
+```
+
+Для нестандартного prefix в Make можно передать `MBEDTLS_CFLAGS`/`MBEDTLS_LDFLAGS`. Любой JIT/AOT вызов также принимает `--cflags` и `--ldflags`; переменные `LUAC_CFLAGS`/`LUAC_LDFLAGS` добавляют флаги глобально:
+
+```sh
+./luac --cflags=-DLUAC_WITH_MBEDTLS \
+  --ldflags="-lmbedtls -lmbedx509 -lmbedcrypto" examples/https.lua
+./luac --cflags=-DLUAC_WITH_MINIAUDIO --ldflags="-ldl -pthread" examples/audio.lua
+```
+
+HTTPS по умолчанию обязательно проверяет certificate chain и hostname через системные CA. Неудачный handshake никогда не повторяется как HTTP. `http.setca(path)` выбирает private CA bundle. `http.setverify(false)` существует только как явный opt-out и не должен использоваться в production.
+
+Audio buffers содержат native interleaved float32 PCM. Доступны WAV PCM 8/16/24/32-bit и float32, sine/square/saw/triangle/noise synthesis, envelopes, mixing, gain/fade/normalize, filters, delay и linear resampling. `audio.playback_available()` сообщает только о наличии compiled backend; `play()` может вернуть `nil, message`, если устройства нет. WAV/DSP остаются рабочими на headless CI.
 
 ## Память без tracing GC
 
@@ -76,8 +104,9 @@ lc_done:
 - файлы и процессы через `io.open/read/write/lines/seek/setvbuf/popen`, стандартные потоки и детерминированное закрытие;
 - `os.date/time/difftime/getenv/remove/rename/tmpname/execute/exit/setlocale`;
 - native modules через `package.preload`, `package.loaded` и `require`;
-- **13 дополнительных native-модулей / 151 API**: `text`, `hex`, `base64`, `url`, `json`, `hash`, `fs`, `path`, `time`, `vec`, `socket`, `http`, `engine`;
-- TCP/UDP/DNS, binary files, JSON Unicode, SHA-256/HMAC, vector math и scene simulation доступны и в JIT, и в AOT;
+- **14 дополнительных native-модулей / 177 API**: `text`, `hex`, `base64`, `url`, `json`, `hash`, `fs`, `path`, `time`, `vec`, `socket`, `http`, `audio`, `engine`;
+- TCP/UDP/DNS, verified HTTPS через mbedTLS, PCM/WAV/synthesis/mixing/effects и optional native playback доступны и в JIT, и в AOT;
+- binary files, JSON Unicode, SHA-256/HMAC, vector math и scene simulation также работают без внешних dependencies;
 - `collectgarbage` как compatibility API для метрик/состояния, без запуска скрытого collector.
 
 Полный список функций и ограничений — [`docs/LIBRARIES.md`](docs/LIBRARIES.md). Готовые примеры: [`examples/data.lua`](examples/data.lua), [`examples/network.lua`](examples/network.lua), [`examples/game.lua`](examples/game.lua). Встроенные модули одновременно доступны как globals и через `require("json")`, `require("socket")` и т.д.
@@ -110,8 +139,9 @@ print(next(5), next(2)) -- 15  17
 | Runtime `load`, `loadstring`, `dofile` | Ещё не реализованы; compilation происходит через compiler API/CLI |
 | `require` | Работает для `package.preload`; динамический поиск и загрузка файлов пока не подключены |
 | LuaJIT FFI | Ещё не реализован |
-| HTTPS/TLS | Ещё нет; native HTTP/1.1 работает только для явного `http://` |
-| Engine | Native 2D world/simulation и Studio viewport работают; audio/physics solver/asset pipeline не заявляются готовыми |
+| HTTPS/TLS | Настоящий mbedTLS, CA и hostname verification; optional build dependency |
+| Audio | Native PCM/WAV/DSP работают; playback через miniaudio включается опционально |
+| Engine | Native 2D world/simulation и Studio viewport работают; physics solver/asset pipeline не заявляются готовыми |
 | `debug` library, `string.dump`, `string.pack/unpack/packsize` | Ещё не реализованы |
 | Раздельные integer/float subtypes | Пока единый `double`; bitwise преобразует к integer по правилам runtime |
 | `math.maxinteger/mininteger` | Безопасный exactly representable диапазон ±2^53−1, не полный int64 |
@@ -207,7 +237,7 @@ luac_free(error);
 
 ## Копирование в собственный build
 
-Lua/LuaJIT не скачиваются и не подключаются. Для compiler + всех native libraries можно скопировать только **наши** файлы `src/luac.c`, `src/luac.h`, `src/runtime.h` и `src/luac_libraries.h`. Для C++ engine отдельно достаточно `src/engine.hpp`:
+Lua/LuaJIT не скачиваются и не подключаются. Для compiler + всех native libraries скопируйте `src/luac.c`, `src/luac.h`, `src/runtime.h`, `src/luac_libraries.h`, `src/luac_tls.h`, `src/luac_audio.h` и `src/third_party/`. Без playback miniaudio header не компилируется, но должен быть доступен в source distribution. Для C++ engine отдельно достаточно `src/engine.hpp`:
 
 ```sh
 cc -std=gnu99 -DLUAC_LIBRARY_ONLY -DLUAC_RUNTIME_PATH=\"runtime.h\" \
@@ -239,8 +269,10 @@ cmake --install build-cmake --prefix /your/prefix
 В другом проекте:
 
 ```cmake
-find_package(LuaC 0.4 CONFIG REQUIRED)
+find_package(LuaC 0.5 CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE LuaC::luac)
+# Generated native runtime и его optional dependencies:
+target_link_libraries(your_generated_target PRIVATE LuaC::runtime)
 # Опционально: target_link_libraries(your_game PRIVATE LuaC::engine)
 ```
 
@@ -259,7 +291,7 @@ make test
 SANITIZE=1 make test  # дополнительно ASan/UBSan, если компилятор их поддерживает
 ```
 
-`tests/features.lua`, `tests/compat.lua` и `tests/libraries.lua` прогоняются через JIT и AOT. Расширенный suite проверяет data/text/fs/path/vector/engine functions, SHA-256/HMAC и реальные TCP/UDP loopback exchanges без внешней сети. Sanitizer job запускает generated native code под ASan/UBSan/LeakSanitizer. Отдельные headless tests проверяют Nuklear/Vulkan geometry и C++ world/components/fixed-step simulation. CMake/CTest повторяет проверки и дополнительно собирает compiler/runtime/engine consumers после install.
+`tests/features.lua`, `tests/compat.lua`, `tests/libraries.lua` и `tests/audio.lua` прогоняются через JIT и AOT. Расширенный suite проверяет data/text/fs/path/vector/engine functions, SHA-256/HMAC и реальные TCP/UDP loopback exchanges без внешней сети. Sanitizer job запускает generated native code под ASan/UBSan/LeakSanitizer. Отдельные headless tests проверяют Nuklear/Vulkan geometry и C++ world/components/fixed-step simulation. CMake/CTest повторяет проверки и дополнительно собирает compiler/runtime/engine consumers после install. Конфигурация с mbedTLS запускает `tests/run_https.sh`: локальный self-signed server должен быть отклонён, явно доверенный CA принят, а hostname mismatch отклонён и в JIT, и в AOT.
 
 ## Устройство проекта
 
@@ -267,8 +299,10 @@ SANITIZE=1 make test  # дополнительно ASan/UBSan, если комп
 - `src/luac.h` — публичный API библиотеки;
 - `src/runtime.h` — значения, metatables, файлы, sockets и ownership runtime;
 - `src/luac_libraries.h` — самостоятельные data/network/system/engine native modules;
+- `src/luac_tls.h` — mbedTLS transport и certificate verification;
+- `src/luac_audio.h`, `src/third_party/miniaudio.h` — PCM/WAV/DSP и optional playback;
 - `src/engine.hpp` — header-only C++17 world/scene library для Studio и embedding;
-- `docs/LIBRARIES.md` — справочник по 151 новому API;
+- `docs/LIBRARIES.md` — справочник по 177 новым API;
 - `CMakeLists.txt`, `cmake/` — build/install/export package и AOT CTest;
 - `examples/embed/` — независимый consumer для CMake package;
 - `gui/` — Nuklear editor, command→geometry adapter, desktop Vulkan renderer и GLSL shaders;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LuaC VERSION 0.4.0 LANGUAGES C CXX)
+project(LuaC VERSION 0.5.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -7,6 +7,64 @@ include(CTest)
 
 option(LUAC_BUILD_CLI "Build the native JIT/AOT compiler executable" ON)
 option(LUAC_BUILD_UI_TESTS "Build the headless Nuklear command adapter test" ON)
+option(LUAC_WITH_MBEDTLS "Enable verified HTTPS with mbedTLS" OFF)
+option(LUAC_WITH_MINIAUDIO "Enable native audio playback with bundled miniaudio" OFF)
+
+add_library(luac_runtime INTERFACE)
+add_library(LuaC::runtime ALIAS luac_runtime)
+set_target_properties(luac_runtime PROPERTIES EXPORT_NAME runtime)
+target_include_directories(luac_runtime INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+set(LUAC_NATIVE_CFLAGS "")
+set(LUAC_NATIVE_LDFLAGS "")
+if(LUAC_WITH_MBEDTLS)
+    find_package(MbedTLS CONFIG REQUIRED)
+    target_compile_definitions(luac_runtime INTERFACE LUAC_WITH_MBEDTLS)
+    target_link_libraries(luac_runtime INTERFACE MbedTLS::mbedtls MbedTLS::mbedx509 MbedTLS::mbedcrypto)
+    string(APPEND LUAC_NATIVE_CFLAGS " -DLUAC_WITH_MBEDTLS")
+    get_target_property(_mbedtls_includes MbedTLS::mbedtls INTERFACE_INCLUDE_DIRECTORIES)
+    foreach(_include IN LISTS _mbedtls_includes)
+        if(NOT _include MATCHES "^\\$<")
+            string(APPEND LUAC_NATIVE_CFLAGS " -I\"${_include}\"")
+        endif()
+    endforeach()
+    foreach(_target mbedtls mbedx509 mbedcrypto everest p256m)
+        if(TARGET MbedTLS::${_target})
+            get_target_property(_location MbedTLS::${_target} IMPORTED_LOCATION)
+            if(NOT _location)
+                get_target_property(_location MbedTLS::${_target} IMPORTED_LOCATION_RELEASE)
+            endif()
+            if(_location)
+                string(APPEND LUAC_NATIVE_LDFLAGS " \"${_location}\"")
+            else()
+                string(APPEND LUAC_NATIVE_LDFLAGS " -l${_target}")
+            endif()
+        endif()
+    endforeach()
+endif()
+if(LUAC_WITH_MINIAUDIO)
+    find_package(Threads REQUIRED)
+    target_compile_definitions(luac_runtime INTERFACE LUAC_WITH_MINIAUDIO)
+    target_link_libraries(luac_runtime INTERFACE Threads::Threads ${CMAKE_DL_LIBS})
+    if(UNIX)
+        target_link_libraries(luac_runtime INTERFACE m)
+    endif()
+    string(APPEND LUAC_NATIVE_CFLAGS " -DLUAC_WITH_MINIAUDIO")
+    string(APPEND LUAC_NATIVE_LDFLAGS " -pthread")
+    if(CMAKE_DL_LIBS)
+        string(APPEND LUAC_NATIVE_LDFLAGS " -l${CMAKE_DL_LIBS}")
+    endif()
+endif()
+if(WIN32)
+    target_link_libraries(luac_runtime INTERFACE ws2_32 crypt32)
+    if(LUAC_WITH_MBEDTLS)
+        string(APPEND LUAC_NATIVE_LDFLAGS " -lcrypt32")
+    endif()
+elseif(UNIX)
+    target_link_libraries(luac_runtime INTERFACE m)
+endif()
 
 add_library(luac_library src/luac.c)
 add_library(LuaC::luac ALIAS luac_library)
@@ -43,6 +101,14 @@ if(CMAKE_DL_LIBS)
     target_link_libraries(luac_library PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
+set(LUAC_DEFAULT_CFLAGS_VALUE "${LUAC_NATIVE_CFLAGS}")
+set(LUAC_DEFAULT_LDFLAGS_VALUE "${LUAC_NATIVE_LDFLAGS}")
+foreach(_flag_var LUAC_DEFAULT_CFLAGS_VALUE LUAC_DEFAULT_LDFLAGS_VALUE)
+    string(REPLACE "\\" "\\\\" ${_flag_var} "${${_flag_var}}")
+    string(REPLACE "\"" "\\\"" ${_flag_var} "${${_flag_var}}")
+endforeach()
+configure_file(cmake/luac_default_flags.h.in "${CMAKE_CURRENT_BINARY_DIR}/luac_default_flags.h" @ONLY)
+
 if(LUAC_BUILD_CLI)
     add_executable(luac_compiler src/luac.c)
     add_executable(LuaC::compiler ALIAS luac_compiler)
@@ -57,6 +123,8 @@ if(LUAC_BUILD_CLI)
         LUAC_RUNTIME_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/runtime.h"
     )
     target_include_directories(luac_compiler PRIVATE src)
+    target_compile_definitions(luac_compiler PRIVATE LUAC_HAS_BUILD_CONFIG)
+    target_include_directories(luac_compiler PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     if(CMAKE_DL_LIBS)
         target_link_libraries(luac_compiler PRIVATE ${CMAKE_DL_LIBS})
     endif()
@@ -92,6 +160,33 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
             PASS_REGULAR_EXPRESSION "LuaC extended libraries: OK"
         )
+        add_test(NAME luac-audio-jit COMMAND luac_compiler
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/audio.lua")
+        set_tests_properties(luac-audio-jit PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            PASS_REGULAR_EXPRESSION "LuaC native audio: OK"
+        )
+        add_test(NAME luac-audio-aot
+            COMMAND ${CMAKE_COMMAND}
+                -DLUAC=$<TARGET_FILE:luac_compiler>
+                -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/audio.lua
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/luac-audio-aot
+                -DWORKDIR=${CMAKE_CURRENT_SOURCE_DIR}
+                -DEXPECTED=LuaC.native.audio:.OK
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunAotTest.cmake
+        )
+        if(LUAC_WITH_MBEDTLS AND UNIX)
+            add_test(NAME luac-https-verification
+                COMMAND ${CMAKE_COMMAND} -E env
+                    PYTHON=${Python3_EXECUTABLE}
+                    LUAC=$<TARGET_FILE:luac_compiler>
+                    bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_https.sh
+            )
+            set_tests_properties(luac-https-verification PROPERTIES
+                WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                PASS_REGULAR_EXPRESSION "certificate and hostname verification: OK"
+            )
+        endif()
         add_test(NAME luac-libraries-aot
             COMMAND ${CMAKE_COMMAND}
                 -DLUAC=$<TARGET_FILE:luac_compiler>
@@ -122,7 +217,7 @@ write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/LuaCConfigVersion.
     COMPATIBILITY SameMajorVersion
 )
 
-install(TARGETS luac_library luac_engine
+install(TARGETS luac_library luac_engine luac_runtime
     EXPORT LuaCTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -139,7 +234,12 @@ install(EXPORT LuaCTargets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LuaC
 )
 install(FILES src/luac.h src/engine.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES src/runtime.h src/luac_libraries.h DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)
+install(FILES src/runtime.h src/luac_libraries.h src/luac_tls.h src/luac_audio.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES src/runtime.h src/luac_libraries.h src/luac_tls.h src/luac_audio.h
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)
+install(DIRECTORY src/third_party DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY src/third_party DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/LuaCConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/LuaCConfigVersion.cmake"

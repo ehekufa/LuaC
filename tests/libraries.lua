@@ -123,9 +123,10 @@ server:close()
 assert(#socket.addresses("localhost") > 0)
 assert(#socket.gethostname() > 0)
 
--- HTTP is deliberately explicit about the lack of a TLS backend.
+-- HTTPS either reports an unavailable TLS backend or performs normal secure
+-- networking. Dedicated local tests verify CA and hostname enforcement.
 local secureBody, secureError = http.get("https://example.invalid")
 eq(secureBody, nil)
-assert(text.contains(secureError, "TLS"))
+assert(type(secureError) == "string" and #secureError > 0)
 
 print("LuaC extended libraries: OK")

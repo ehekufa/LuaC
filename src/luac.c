@@ -20,7 +20,7 @@
 #define LUAC_RUNTIME_PATH "src/runtime.h"
 #endif
 
-#define LUAC_VERSION "0.4.0"
+#define LUAC_VERSION "0.5.0"
 #include "luac.h"
 
 typedef struct { char *data; size_t len, cap; } Str;
@@ -763,13 +763,22 @@ static char *shell_quote(const char*s){
 #endif
 }
 static int run_command(const char*cmd){int r=system(cmd);if(r==-1)return -1;return r;}
-static void usage(void){puts("LuaC "LUAC_VERSION" — Lua-syntax native compiler without a tracing GC\n\nUsage:\n  luac file.lua              JIT compile and run\n  luac --check file.lua      Parse and validate\n  luac --emit-c file.lua [-o out.c]\n  luac --aot file.lua -o program\n\nOptions: --cc COMPILER  --keep-c PATH  --version");}
+#ifdef LUAC_HAS_BUILD_CONFIG
+#include "luac_default_flags.h"
+#endif
+#ifndef LUAC_DEFAULT_CFLAGS
+#define LUAC_DEFAULT_CFLAGS ""
+#endif
+#ifndef LUAC_DEFAULT_LDFLAGS
+#define LUAC_DEFAULT_LDFLAGS ""
+#endif
+static void usage(void){puts("LuaC "LUAC_VERSION" — Lua-syntax native compiler without a tracing GC\n\nUsage:\n  luac file.lua              JIT compile and run\n  luac --check file.lua      Parse and validate\n  luac --emit-c file.lua [-o out.c]\n  luac --aot file.lua -o program\n\nOptions: --cc COMPILER  --cflags FLAGS  --ldflags FLAGS  --keep-c PATH  --version\nEnvironment: CC, LUAC_CFLAGS and LUAC_LDFLAGS append native compiler flags.");}
 
 int main(int argc,char**argv){
-    const char*input=NULL,*output=NULL,*keep=NULL,*cc=getenv("CC");enum{MODE_JIT,MODE_CHECK,MODE_C,MODE_AOT}mode=MODE_JIT;int i,status=1;size_t length;char*source,*generated;Parser p;Stmt*program;
+    const char*input=NULL,*output=NULL,*keep=NULL,*cc=getenv("CC");Str extra_cflags,extra_ldflags;sb_init(&extra_cflags);sb_init(&extra_ldflags);sb_add(&extra_cflags,LUAC_DEFAULT_CFLAGS);sb_add(&extra_ldflags,LUAC_DEFAULT_LDFLAGS);{const char*flags=getenv("LUAC_CFLAGS");if(flags){sb_add(&extra_cflags," ");sb_add(&extra_cflags,flags);}flags=getenv("LUAC_LDFLAGS");if(flags){sb_add(&extra_ldflags," ");sb_add(&extra_ldflags,flags);}}enum{MODE_JIT,MODE_CHECK,MODE_C,MODE_AOT}mode=MODE_JIT;int i,status=1;size_t length;char*source,*generated;Parser p;Stmt*program;
     if(!cc||!*cc)cc="cc";
     luac_executable_path = argc > 0 ? argv[0] : NULL;
-    for(i=1;i<argc;++i){if(!strcmp(argv[i],"--check"))mode=MODE_CHECK;else if(!strcmp(argv[i],"--emit-c"))mode=MODE_C;else if(!strcmp(argv[i],"--aot"))mode=MODE_AOT;else if(!strcmp(argv[i],"--jit"))mode=MODE_JIT;else if(!strcmp(argv[i],"-o")&&i+1<argc)output=argv[++i];else if(!strcmp(argv[i],"--keep-c")&&i+1<argc)keep=argv[++i];else if(!strcmp(argv[i],"--cc")&&i+1<argc)cc=argv[++i];else if(!strcmp(argv[i],"--version")){puts("LuaC "LUAC_VERSION);return 0;}else if(!strcmp(argv[i],"--help")||!strcmp(argv[i],"-h")){usage();return 0;}else if(argv[i][0]=='-'){fprintf(stderr,"luac: unknown option %s\n",argv[i]);return 2;}else if(!input)input=argv[i];else{fprintf(stderr,"luac: too many input files\n");return 2;}}
+    for(i=1;i<argc;++i){if(!strcmp(argv[i],"--check"))mode=MODE_CHECK;else if(!strcmp(argv[i],"--emit-c"))mode=MODE_C;else if(!strcmp(argv[i],"--aot"))mode=MODE_AOT;else if(!strcmp(argv[i],"--jit"))mode=MODE_JIT;else if(!strcmp(argv[i],"-o")&&i+1<argc)output=argv[++i];else if(!strcmp(argv[i],"--keep-c")&&i+1<argc)keep=argv[++i];else if(!strcmp(argv[i],"--cc")&&i+1<argc)cc=argv[++i];else if(!strcmp(argv[i],"--cflags")&&i+1<argc){sb_add(&extra_cflags," ");sb_add(&extra_cflags,argv[++i]);}else if(!strcmp(argv[i],"--ldflags")&&i+1<argc){sb_add(&extra_ldflags," ");sb_add(&extra_ldflags,argv[++i]);}else if(!strcmp(argv[i],"--version")){puts("LuaC "LUAC_VERSION);return 0;}else if(!strcmp(argv[i],"--help")||!strcmp(argv[i],"-h")){usage();return 0;}else if(argv[i][0]=='-'){fprintf(stderr,"luac: unknown option %s\n",argv[i]);return 2;}else if(!input)input=argv[i];else{fprintf(stderr,"luac: too many input files\n");return 2;}}
     if(!input){usage();return 2;}source=read_file(input,&length);if(!source)return 1;
     memset(&p,0,sizeof(p));p.source=source;p.filename=input;p.length=length;p.line=1;p.column=1;next_token(&p);program=parse_block(&p);if(p.token.kind!=T_EOF)parse_error(&p,"unexpected '%s'",token_name(p.token.kind));
     if(p.failed){fprintf(stderr,"%s\n",p.error);token_clear(&p.token);free_stmt(program);free(source);return 1;}
@@ -787,7 +796,7 @@ int main(int argc,char**argv){
      if(keep)cfile=xstrdup(keep);else{if(!mkdtemp(tmp)){fprintf(stderr,"luac: mkdtemp: %s\n",strerror(errno));goto done;}cfile=xmalloc(strlen(tmp)+8);sprintf(cfile,"%s/main.c",tmp);}
      if(!write_file(cfile,generated,strlen(generated))){fprintf(stderr,"luac: cannot write %s\n",cfile);free(cfile);goto done;}
      qcc=shell_quote(cc);qc=shell_quote(cfile);sb_init(&cmd);
-     if(mode==MODE_AOT){if(!output){fprintf(stderr,"luac: --aot requires -o OUTPUT\n");free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}qout=shell_quote(output);sb_printf(&cmd,"%s -std=gnu99 -O2 -DLUAC_STANDALONE %s -o %s -lm",qcc,qc,qout);
+     if(mode==MODE_AOT){if(!output){fprintf(stderr,"luac: --aot requires -o OUTPUT\n");free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}qout=shell_quote(output);sb_printf(&cmd,"%s -std=gnu99 -O2 -DLUAC_STANDALONE %s %s -o %s -lm %s",qcc,extra_cflags.data?extra_cflags.data:"",qc,qout,extra_ldflags.data?extra_ldflags.data:"");
 #ifdef _WIN32
      sb_add(&cmd," -lws2_32");
 #endif
@@ -798,7 +807,7 @@ int main(int argc,char**argv){
 #else
       sprintf(sofile,"%s.so",cfile);
 #endif
-      qso=shell_quote(sofile);sb_printf(&cmd,"%s -std=gnu99 -O2 -fPIC -shared %s -o %s -lm",qcc,qc,qso);
+      qso=shell_quote(sofile);sb_printf(&cmd,"%s -std=gnu99 -O2 -fPIC -shared %s %s -o %s -lm %s",qcc,extra_cflags.data?extra_cflags.data:"",qc,qso,extra_ldflags.data?extra_ldflags.data:"");
 #ifdef _WIN32
       sb_add(&cmd," -lws2_32");
 #endif
@@ -807,10 +816,21 @@ int main(int argc,char**argv){
 #ifdef _WIN32
      /* Do not pass Windows paths through cmd.exe. _spawnvp quotes each argv
         element using the C runtime rules, including paths containing spaces. */
-     if(mode==MODE_AOT)cr=(int)_spawnvp(_P_WAIT,cc,(const char *const[]){
-         cc,"-std=gnu99","-O2","-DLUAC_STANDALONE",cfile,"-o",output,"-lm","-lws2_32",NULL});
-     else cr=(int)_spawnvp(_P_WAIT,cc,(const char *const[]){
-         cc,"-std=gnu99","-O2","-fPIC","-shared",cfile,"-o",sofile,"-lm","-lws2_32",NULL});
+     {char *cresponse=NULL,*lresponse=NULL,*cresponse_arg=NULL,*lresponse_arg=NULL;size_t response_length=strlen(cfile)+12;
+      if(extra_cflags.data&&*extra_cflags.data){
+          FILE*file;cresponse=xmalloc(response_length);snprintf(cresponse,response_length,"%s.c.rsp",cfile);
+          file=fopen(cresponse,"wb");if(!file||fwrite(extra_cflags.data,1,extra_cflags.length,file)!=extra_cflags.length){if(file)fclose(file);fprintf(stderr,"luac: cannot write compiler response file\n");free(cresponse);free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}fclose(file);
+          cresponse_arg=xmalloc(response_length+1);snprintf(cresponse_arg,response_length+1,"@%s",cresponse);}
+      if(extra_ldflags.data&&*extra_ldflags.data){
+          FILE*file;lresponse=xmalloc(response_length);snprintf(lresponse,response_length,"%s.link.rsp",cfile);
+          file=fopen(lresponse,"wb");if(!file||fwrite(extra_ldflags.data,1,extra_ldflags.length,file)!=extra_ldflags.length){if(file)fclose(file);fprintf(stderr,"luac: cannot write linker response file\n");if(cresponse){unlink(cresponse);free(cresponse);free(cresponse_arg);}free(lresponse);free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}fclose(file);
+          lresponse_arg=xmalloc(response_length+1);snprintf(lresponse_arg,response_length+1,"@%s",lresponse);}
+      if(mode==MODE_AOT)cr=(int)_spawnvp(_P_WAIT,cc,(const char *const[]){
+          cc,"-std=gnu99","-O2","-DLUAC_STANDALONE",cresponse_arg,cfile,"-o",output,"-lm","-lws2_32",lresponse_arg,NULL});
+      else cr=(int)_spawnvp(_P_WAIT,cc,(const char *const[]){
+          cc,"-std=gnu99","-O2","-fPIC","-shared",cresponse_arg,cfile,"-o",sofile,"-lm","-lws2_32",lresponse_arg,NULL});
+      if(cresponse){unlink(cresponse);free(cresponse);free(cresponse_arg);}
+      if(lresponse){unlink(lresponse);free(lresponse);free(lresponse_arg);}}
 #else
      cr=run_command(cmd.data);
 #endif

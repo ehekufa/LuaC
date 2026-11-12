@@ -1,5 +1,12 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+if(@LUAC_WITH_MBEDTLS@)
+    find_dependency(MbedTLS CONFIG)
+endif()
+if(@LUAC_WITH_MINIAUDIO@)
+    find_dependency(Threads)
+endif()
 include("${CMAKE_CURRENT_LIST_DIR}/LuaCTargets.cmake")
 set_and_check(LuaC_RUNTIME_DIR "@PACKAGE_CMAKE_INSTALL_DATADIR@/luac")
 set(LuaC_VERSION "@PROJECT_VERSION@")

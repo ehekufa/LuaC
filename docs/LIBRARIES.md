@@ -1,4 +1,4 @@
-# LuaC 0.4 native libraries
+# LuaC 0.5 native libraries
 
 Все перечисленные функции реализованы в `src/luac_libraries.h` и компилируются в тот же native C executable/shared library, что и программа. Lua VM, динамический plugin loader и внешняя `liblua` не используются.
 
@@ -10,7 +10,7 @@ local sameJson = require("json") -- встроенный module, уже нахо
 assert(sameJson == json)
 ```
 
-Новые 13 модулей содержат **151 callable API** (без подсчёта alias `net`). Существующие `string`, `table`, `math`, `bit`, `bit32`, `utf8`, `io` и `os` также остаются доступны.
+14 модулей содержат **177 callable API** (без подсчёта alias `net`). Существующие `string`, `table`, `math`, `bit`, `bit32`, `utf8`, `io` и `os` также остаются доступны.
 
 ## Data and text
 
@@ -77,9 +77,34 @@ peer:close(); client:close(); server:close()
 
 - `http.get(url)`;
 - `http.post(url, body, content_type)`;
-- `http.request(url, method, body, content_type)`.
+- `http.request(url, method, body, content_type)`;
+- `http.tls_available()`;
+- `http.setca(pem_path)` — выбрать доверенный CA bundle вместо системного;
+- `http.setverify(boolean)` — verification включена по умолчанию; отключение возможно только явно и не рекомендуется.
 
-Возврат: `body, status, headers`. Header names приводятся к lowercase. Поддерживаются Content-Length/close-delimited responses и chunked transfer decoding. **TLS backend пока нет**: `https://` возвращает `nil, message`, а не небезопасную имитацию HTTPS. Для production HTTPS нужен отдельно проверенный TLS backend.
+Возврат: `body, status, headers`. Header names приводятся к lowercase. Поддерживаются Content-Length/close-delimited responses и chunked transfer decoding. При сборке с `LUAC_WITH_MBEDTLS` схема `https://` использует настоящий mbedTLS handshake, проверку цепочки сертификата и hostname. Linux/macOS читают системный CA bundle, Windows — ROOT certificate store. Ошибка TLS никогда не вызывает незаметный переход на plaintext. Без backend возвращается `nil, message`.
+
+```lua
+assert(http.tls_available())
+local body, status = http.get("https://github.com/")
+assert(body and status == 200)
+-- Для частной PKI: http.setca("/path/to/private-ca.pem")
+```
+
+## Native audio
+
+Модуль `audio` работает с ownership-managed userdata: interleaved float32 PCM, samples нормализованы в `[-1, 1]`. DSP и WAV не требуют ни backend, ни аудиоустройства.
+
+- constructors/I/O: `silence(seconds, rate=44100, channels=1)`, `tone(frequency, seconds, options)`, `load(path)`, `mix(...)`;
+- metadata: `info`, `frames`, `channels`, `sample_rate`, `duration`;
+- sample access: `get(frame, channel=1)`, `set(frame, channel, sample)` (индексы с 1);
+- processing: `gain`, `fade`, `normalize`, `lowpass`, `highpass`, `delay`, `resample`;
+- playback: `play`, `wait`, `stop`, `playback_available()`;
+- `save(path)` пишет PCM16 WAV, `save(path, "float")` — float32 WAV.
+
+`tone` options: `sample_rate`, `channels`, `amplitude`, `attack`, `release`, `pan`, `waveform` (`sine`, `square`, `saw`, `triangle`, `noise`). `load` читает RIFF/WAVE PCM 8/16/24/32-bit и float32. `mix` требует одинаковые sample rate/channel count и дополняет короткие buffers тишиной. Processing methods изменяют buffer и возвращают его для chaining; `resample` и `mix` создают новый buffer.
+
+Playback включается `LUAC_WITH_MINIAUDIO` и использует default native device через bundled miniaudio. При отсутствии backend или устройства `play` возвращает `nil, message`; остальные audio functions продолжают работать.
 
 ## Lua scene engine
 
@@ -105,7 +130,7 @@ engine.update(world, 1 / 60)
 `src/engine.hpp` — самостоятельный C++17 header-only API, не зависящий от Lua runtime, Vulkan или Studio:
 
 ```cmake
-find_package(LuaC 0.4 CONFIG REQUIRED)
+find_package(LuaC 0.5 CONFIG REQUIRED)
 add_executable(my_game main.cpp)
 target_link_libraries(my_game PRIVATE LuaC::engine)
 ```
@@ -118,4 +143,4 @@ player.body.velocity = {20, 0};
 world.advance(1.0 / 60.0); // deterministic fixed steps
 ```
 
-`World` включает stable entity IDs, transforms, bodies, sprites, tags, numeric components, camera, AABB collisions, play/pause/step и bounded fixed-step catch-up. Это расширяемый native 2D core; physics solver, audio, asset importer и networking для игровых объектов не выдаются за уже готовые подсистемы.
+`World` включает stable entity IDs, transforms, bodies, sprites, tags, numeric components, camera, AABB collisions, play/pause/step и bounded fixed-step catch-up. Это расширяемый native 2D core; physics solver, asset importer и networking для игровых объектов не выдаются за уже готовые подсистемы.
