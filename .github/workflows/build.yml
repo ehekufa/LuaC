@@ -139,9 +139,9 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-      - run: brew install mbedtls pkg-config
-      - run: make -j2 MBEDTLS=1 MINIAUDIO=1 MBEDTLS_CFLAGS="-I$(brew --prefix mbedtls)/include" MBEDTLS_LDFLAGS="-L$(brew --prefix mbedtls)/lib -lmbedtls -lmbedx509 -lmbedcrypto" all
-      - run: make -j2 MBEDTLS=1 MINIAUDIO=1 MBEDTLS_CFLAGS="-I$(brew --prefix mbedtls)/include" MBEDTLS_LDFLAGS="-L$(brew --prefix mbedtls)/lib -lmbedtls -lmbedx509 -lmbedcrypto" libraries
+      - run: brew install mbedtls@3 pkg-config
+      - run: make -j2 MBEDTLS=1 MINIAUDIO=1 MBEDTLS_CFLAGS="-I$(brew --prefix mbedtls@3)/include" MBEDTLS_LDFLAGS="-L$(brew --prefix mbedtls@3)/lib -lmbedtls -lmbedx509 -lmbedcrypto" all
+      - run: make -j2 MBEDTLS=1 MINIAUDIO=1 MBEDTLS_CFLAGS="-I$(brew --prefix mbedtls@3)/include" MBEDTLS_LDFLAGS="-L$(brew --prefix mbedtls@3)/lib -lmbedtls -lmbedx509 -lmbedcrypto" libraries
       - name: HTTPS and audio smoke
         run: |
           set +e
