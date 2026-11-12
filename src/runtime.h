@@ -54,9 +54,10 @@ typedef struct LcSocket LcSocket;
 typedef struct LcAudio LcAudio;
 typedef struct LcCoroutine LcCoroutine;
 typedef struct LcFFILibrary LcFFILibrary;
+typedef struct LcWebsocket LcWebsocket;
 
 typedef enum {
-    LC_NIL = 0, LC_BOOL, LC_NUMBER, LC_INTEGER, LC_STRING, LC_TABLE, LC_FUNCTION, LC_TUPLE, LC_FILE, LC_SOCKET, LC_AUDIO, LC_COROUTINE, LC_FFI
+    LC_NIL = 0, LC_BOOL, LC_NUMBER, LC_INTEGER, LC_STRING, LC_TABLE, LC_FUNCTION, LC_TUPLE, LC_FILE, LC_SOCKET, LC_AUDIO, LC_COROUTINE, LC_FFI, LC_WEBSOCKET
 } LcType;
 
 typedef struct LcValue {
@@ -74,6 +75,7 @@ typedef struct LcValue {
         LcAudio *audio;
         LcCoroutine *coroutine;
         LcFFILibrary *ffi;
+        LcWebsocket *websocket;
     } as;
 } LcValue;
 
@@ -176,6 +178,7 @@ struct LcContext {
     LcValue file_methods;
     LcValue socket_methods;
     LcValue audio_methods;
+    LcValue websocket_methods;
     LcValue input, output, error_output;
     int socket_initialized;
     char tls_ca_file[4096];
@@ -205,6 +208,10 @@ static void lc_error(LcContext *ctx, const char *fmt, ...) {
 
 static void lc_gc_collect(LcContext *ctx);
 static void lc_ffi_dispose(LcFFILibrary *library);
+static void lc_websocket_dispose(LcWebsocket *websocket);
+static int lc_websocket_is_closed(LcWebsocket *websocket);
+static LcValue lc_websocket_socket(LcWebsocket *websocket);
+static void lc_websocket_clear_socket(LcWebsocket *websocket);
 static void *lc_alloc(LcContext *ctx, size_t size, int kind) {
     LcObject *o = (LcObject *)calloc(1, size);
     if (!o) { lc_error(ctx, "out of memory"); return NULL; }
@@ -230,6 +237,7 @@ static LcObject *lc_value_object(LcValue v) {
         case LC_AUDIO: return (LcObject *)v.as.audio;
         case LC_COROUTINE: return (LcObject *)v.as.coroutine;
         case LC_FFI: return (LcObject *)v.as.ffi;
+        case LC_WEBSOCKET: return (LcObject *)v.as.websocket;
         default: return NULL;
     }
 }
@@ -293,6 +301,10 @@ static void lc_free_value(LcContext *ctx, LcValue v) {
         case LC_TUPLE:
             for (i = 0; i < v.as.tuple->count; ++i)
                 lc_release(ctx, v.as.tuple->items[i]);
+            break;
+        case LC_WEBSOCKET:
+            lc_websocket_dispose(v.as.websocket);
+            lc_release(ctx, lc_websocket_socket(v.as.websocket));
             break;
         case LC_FFI:
             lc_ffi_dispose(v.as.ffi);
@@ -443,6 +455,7 @@ static int lc_value_equal(LcValue a, LcValue b) {
         case LC_AUDIO: return a.as.audio == b.as.audio;
         case LC_COROUTINE: return a.as.coroutine == b.as.coroutine;
         case LC_FFI: return a.as.ffi == b.as.ffi;
+        case LC_WEBSOCKET: return a.as.websocket == b.as.websocket;
         default: return 0;
     }
 }
@@ -534,6 +547,9 @@ static LcValue lc_table_get(LcContext *ctx, LcValue table, LcValue key) {
         }
         if (current.type == LC_SOCKET && ctx->socket_methods.type == LC_TABLE) {
             result = lc_table_raw_get(ctx, ctx->socket_methods, key); lc_release(ctx, current); return result;
+        }
+        if (current.type == LC_WEBSOCKET && ctx->websocket_methods.type == LC_TABLE) {
+            result = lc_table_raw_get(ctx, ctx->websocket_methods, key); lc_release(ctx, current); return result;
         }
         if (current.type == LC_AUDIO && ctx->audio_methods.type == LC_TABLE) {
             result = lc_table_raw_get(ctx, ctx->audio_methods, key); lc_release(ctx, current); return result;
@@ -739,12 +755,16 @@ static LcValue lc_to_string(LcContext *ctx, LcValue v) {
         case LC_FFI:
             snprintf(buf, sizeof(buf), "ffi.library: %p", (void *)v.as.ffi);
             return lc_string(ctx, buf);
+        case LC_WEBSOCKET:
+            if (lc_websocket_is_closed(v.as.websocket)) return lc_string(ctx, "websocket (closed)");
+            snprintf(buf, sizeof(buf), "websocket: %p", (void *)v.as.websocket);
+            return lc_string(ctx, buf);
         default: return lc_string(ctx, "nil");
     }
 }
 
 static const char *lc_type_name(LcValue v) {
-    static const char *names[] = {"nil", "boolean", "number", "number", "string", "table", "function", "tuple", "userdata", "userdata", "userdata", "thread", "userdata"};
+    static const char *names[] = {"nil", "boolean", "number", "number", "string", "table", "function", "tuple", "userdata", "userdata", "userdata", "thread", "userdata", "userdata"};
     v = lc_first_value(v);
     return names[(int)v.type];
 }
@@ -1314,7 +1334,7 @@ static void lc_gc_mark_object(LcObject *object) {
     } else if (object->kind == LC_COROUTINE) {
         LcCoroutine *co = (LcCoroutine *)object;
         lc_gc_mark_edge(co->function); lc_gc_mark_edge(co->resume_args); lc_gc_mark_edge(co->yielded); lc_gc_mark_edge(co->result);
-    }
+    } else if (object->kind == LC_WEBSOCKET) lc_gc_mark_edge(lc_websocket_socket((LcWebsocket *)object));
 }
 static LcValue lc_gc_object_value(LcObject *object) {
     LcValue value = lc_nil();
@@ -1328,6 +1348,7 @@ static LcValue lc_gc_object_value(LcObject *object) {
         case LC_AUDIO: value.type = LC_AUDIO; value.as.audio = (LcAudio *)object; break;
         case LC_COROUTINE: value.type = LC_COROUTINE; value.as.coroutine = (LcCoroutine *)object; break;
         case LC_FFI: value.type = LC_FFI; value.as.ffi = (LcFFILibrary *)object; break;
+        case LC_WEBSOCKET: value.type = LC_WEBSOCKET; value.as.websocket = (LcWebsocket *)object; break;
         default: return value;
     }
     return value;
@@ -1358,7 +1379,7 @@ static void lc_gc_collect(LcContext *ctx) {
         } else if (object->kind == LC_COROUTINE) {
             LcCoroutine *co = (LcCoroutine *)object;
             lc_gc_count_edge(co->function); lc_gc_count_edge(co->resume_args); lc_gc_count_edge(co->yielded); lc_gc_count_edge(co->result);
-        }
+        } else if (object->kind == LC_WEBSOCKET) lc_gc_count_edge(lc_websocket_socket((LcWebsocket *)object));
     }
     for (object = ctx->objects; object; object = object->next)
         if (object->refs > object->gc_incoming) lc_gc_mark_object(object);
@@ -1400,6 +1421,8 @@ static void lc_gc_collect(LcContext *ctx) {
             LcCoroutine *co = (LcCoroutine *)object;
             LC_GC_RELEASE_LIVE(co->function); LC_GC_RELEASE_LIVE(co->resume_args); LC_GC_RELEASE_LIVE(co->yielded); LC_GC_RELEASE_LIVE(co->result);
             co->function = co->resume_args = co->yielded = co->result = lc_nil();
+        } else if (object->kind == LC_WEBSOCKET) {
+            LcWebsocket *ws = (LcWebsocket *)object; LC_GC_RELEASE_LIVE(lc_websocket_socket(ws)); lc_websocket_clear_socket(ws);
         } else if (object->kind == 100) {
             LcCell *cell = (LcCell *)object; LC_GC_RELEASE_LIVE(cell->value); cell->value = lc_nil();
         }
@@ -2826,6 +2849,7 @@ static void lc_context_destroy(LcContext *ctx) {
         }
         else if (o->kind == LC_SOCKET) lc_socket_close_handle((LcSocket *)o);
         else if (o->kind == LC_AUDIO) { lc_audio_dispose((LcAudio *)o); free(((LcAudio *)o)->samples); }
+        else if (o->kind == LC_WEBSOCKET) lc_websocket_dispose((LcWebsocket *)o);
         else if (o->kind == LC_FFI) lc_ffi_dispose((LcFFILibrary *)o);
         else if (o->kind == LC_COROUTINE) {
 #ifdef _WIN32

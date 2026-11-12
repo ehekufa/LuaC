@@ -10,7 +10,7 @@ local sameJson = require("json") -- встроенный module, уже нахо
 assert(sameJson == json)
 ```
 
-16 модулей содержат **188 callable API** (без подсчёта alias `net`). Существующие `string`, `table`, `math`, `bit`, `bit32`, `utf8`, `io` и `os` также остаются доступны.
+17 модулей содержат **197 callable API** (без подсчёта alias `net`). Существующие `string`, `table`, `math`, `bit`, `bit32`, `utf8`, `io` и `os` также остаются доступны.
 
 ## Modules, integers, coroutines and memory
 
@@ -21,6 +21,29 @@ Integer literals и integer arithmetic сохраняют signed 64-bit знач
 `coroutine`: `create`, `resume`, `yield`, `wrap`, `status`, `running`, `isyieldable`. Реализация stackful: `yield` работает во вложенных функциях и сохраняет locals. Unix использует `ucontext`, Windows — native Fibers. Ошибка внутри coroutine возвращается из `resume` как `false, message`; `wrap` повторно выбрасывает её.
 
 `collectgarbage("collect")` освобождает недостижимые reference cycles во время работы программы. `__mode="k"`, `"v"` и `"kv"` включают weak keys/values. Также доступны `step`, `stop`, `restart`, `isrunning`, `count`.
+
+## WebSocket client and server
+
+```lua
+local ws = assert(websocket.connect("wss://example.com/chat"))
+ws:settimeout(2)
+ws:send("Привет", "text")
+local message, kind = ws:receive()
+ws:ping("keepalive")
+ws:close()
+```
+
+`websocket.connect(url)` поддерживает `ws://` и verified `wss://`. CA и verification настраиваются теми же `http.setca`/`http.setverify`, что и HTTPS. `receive()` возвращает `message, "text"|"binary"`; ping автоматически получает pong, fragmented messages собираются до результата, close возвращает `nil, "close"`. Binary strings сохраняют NUL bytes. Методы: `send`, `receive`/`recv`, `ping`, `pong`, `settimeout`, `close`.
+
+```lua
+local listener = assert(websocket.listen("0.0.0.0", 8080))
+local peer = listener:accept()
+local message = peer:receive()
+peer:send("echo:" .. message, "text")
+peer:close(); listener:close()
+```
+
+Для TLS server передайте `{tls=true, certificate="server.pem", private_key="key.pem"}` в `websocket.listen`. Plain `ws` и `wss` используют один RFC 6455 frame codec с masking, continuation frames и control payload limit 125 bytes. Есть лимит 64 MiB на сообщение; compression/extensions и permessage-deflate пока не поддерживаются. Для `wss` требуется сборка с mbedTLS.
 
 ## Basic native FFI
 

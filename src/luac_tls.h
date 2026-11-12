@@ -10,6 +10,7 @@
 #include <mbedtls/error.h>
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
+#include <mbedtls/pk.h>
 #ifdef _WIN32
 #include <wincrypt.h>
 #endif
@@ -18,6 +19,8 @@ typedef struct {
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config config;
     mbedtls_x509_crt ca;
+    mbedtls_x509_crt certificate;
+    mbedtls_pk_context private_key;
     mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context random;
     LcOsSocket *handle;
@@ -35,6 +38,8 @@ static void lc_tls_cleanup(LcTls *tls) {
     mbedtls_ssl_free(&tls->ssl);
     mbedtls_ssl_config_free(&tls->config);
     mbedtls_x509_crt_free(&tls->ca);
+    mbedtls_x509_crt_free(&tls->certificate);
+    mbedtls_pk_free(&tls->private_key);
     mbedtls_ctr_drbg_free(&tls->random);
     mbedtls_entropy_free(&tls->entropy);
     tls->active = 0;
@@ -89,6 +94,8 @@ static int lc_tls_start(LcContext *ctx, LcTls *tls, LcOsSocket *handle, const ch
     mbedtls_ssl_init(&tls->ssl);
     mbedtls_ssl_config_init(&tls->config);
     mbedtls_x509_crt_init(&tls->ca);
+    mbedtls_x509_crt_init(&tls->certificate);
+    mbedtls_pk_init(&tls->private_key);
     mbedtls_entropy_init(&tls->entropy);
     mbedtls_ctr_drbg_init(&tls->random);
     result = mbedtls_ctr_drbg_seed(&tls->random, mbedtls_entropy_func, &tls->entropy,
@@ -128,6 +135,8 @@ failed:
     mbedtls_ssl_free(&tls->ssl);
     mbedtls_ssl_config_free(&tls->config);
     mbedtls_x509_crt_free(&tls->ca);
+    mbedtls_x509_crt_free(&tls->certificate);
+    mbedtls_pk_free(&tls->private_key);
     mbedtls_ctr_drbg_free(&tls->random);
     mbedtls_entropy_free(&tls->entropy);
     tls->active = 0;
@@ -148,6 +157,37 @@ static int lc_tls_read(LcTls *tls, char *data, size_t length) {
     if (result < 0) { lc_tls_message(tls, result, "TLS read"); return -1; }
     return result;
 }
+static int lc_tls_start_server(LcContext *ctx, LcTls *tls, LcOsSocket *handle, const char *certificate, const char *private_key) {
+    int result; const char *personalization = "LuaC/0.5 WSS server";
+    (void)ctx; memset(tls, 0, sizeof(*tls)); tls->handle = handle;
+    mbedtls_ssl_init(&tls->ssl); mbedtls_ssl_config_init(&tls->config);
+    mbedtls_x509_crt_init(&tls->ca); mbedtls_x509_crt_init(&tls->certificate); mbedtls_pk_init(&tls->private_key);
+    mbedtls_entropy_init(&tls->entropy); mbedtls_ctr_drbg_init(&tls->random);
+    result = mbedtls_ctr_drbg_seed(&tls->random, mbedtls_entropy_func, &tls->entropy, (const unsigned char *)personalization, strlen(personalization));
+    if (result != 0) { lc_tls_message(tls, result, "TLS random initialization"); goto failed; }
+    result = mbedtls_x509_crt_parse_file(&tls->certificate, certificate);
+    if (result != 0) { lc_tls_message(tls, result, "TLS server certificate"); goto failed; }
+    result = mbedtls_pk_parse_keyfile(&tls->private_key, private_key, NULL, mbedtls_ctr_drbg_random, &tls->random);
+    if (result != 0) { lc_tls_message(tls, result, "TLS server private key"); goto failed; }
+    result = mbedtls_ssl_config_defaults(&tls->config, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
+    if (result != 0) { lc_tls_message(tls, result, "TLS server configuration"); goto failed; }
+    mbedtls_ssl_conf_authmode(&tls->config, MBEDTLS_SSL_VERIFY_NONE);
+    mbedtls_ssl_conf_rng(&tls->config, mbedtls_ctr_drbg_random, &tls->random);
+    result = mbedtls_ssl_conf_own_cert(&tls->config, &tls->certificate, &tls->private_key);
+    if (result != 0) { lc_tls_message(tls, result, "TLS server identity"); goto failed; }
+    result = mbedtls_ssl_setup(&tls->ssl, &tls->config);
+    if (result != 0) { lc_tls_message(tls, result, "TLS server setup"); goto failed; }
+    mbedtls_ssl_set_bio(&tls->ssl, handle, lc_tls_send_socket, lc_tls_read_socket, NULL);
+    while ((result = mbedtls_ssl_handshake(&tls->ssl)) != 0) {
+        if (result != MBEDTLS_ERR_SSL_WANT_READ && result != MBEDTLS_ERR_SSL_WANT_WRITE) { lc_tls_message(tls, result, "TLS server handshake"); goto failed; }
+    }
+    tls->active = 1; return 0;
+failed:
+    if (!tls->error[0]) snprintf(tls->error, sizeof(tls->error), "TLS server initialization failed");
+    mbedtls_ssl_free(&tls->ssl); mbedtls_ssl_config_free(&tls->config);
+    mbedtls_x509_crt_free(&tls->ca); mbedtls_x509_crt_free(&tls->certificate); mbedtls_pk_free(&tls->private_key);
+    mbedtls_ctr_drbg_free(&tls->random); mbedtls_entropy_free(&tls->entropy); tls->active = 0; return -1;
+}
 #else
 typedef struct { char error[320]; } LcTls;
 static int lc_tls_start(LcContext *ctx, LcTls *tls, LcOsSocket *handle, const char *host) {
@@ -155,6 +195,7 @@ static int lc_tls_start(LcContext *ctx, LcTls *tls, LcOsSocket *handle, const ch
     snprintf(tls->error, sizeof(tls->error), "HTTPS is disabled: rebuild with LUAC_WITH_MBEDTLS and mbedTLS");
     return -1;
 }
+static int lc_tls_start_server(LcContext *ctx, LcTls *tls, LcOsSocket *handle, const char *certificate, const char *private_key) { (void)ctx; (void)handle; (void)certificate; (void)private_key; (void)tls; snprintf(tls->error, sizeof(tls->error), "WSS server is disabled: rebuild with mbedTLS"); return -1; }
 static int lc_tls_write(LcTls *tls, const char *data, size_t length) { (void)data; (void)length; snprintf(tls->error, sizeof(tls->error), "TLS is unavailable"); return -1; }
 static int lc_tls_read(LcTls *tls, char *data, size_t length) { (void)data; (void)length; snprintf(tls->error, sizeof(tls->error), "TLS is unavailable"); return -1; }
 static void lc_tls_cleanup(LcTls *tls) { (void)tls; }

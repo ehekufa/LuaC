@@ -49,6 +49,10 @@ cmp tests/.tmp/ffi-expected.out tests/.tmp/ffi-jit.out
 LUAC_FFI_FIXTURE="tests/.tmp/ffi-fixture.$ffi_ext" tests/.tmp/ffi-aot > tests/.tmp/ffi-aot.out
 cmp tests/.tmp/ffi-expected.out tests/.tmp/ffi-aot.out
 
+python3 tests/websocket_test.py
+./luac --aot tests/websocket_client.lua -o tests/.tmp/websocket-client-aot >/dev/null
+LUAC_EXECUTABLE="$(pwd)/tests/.tmp/websocket-client-aot" python3 tests/websocket_test.py --client-only
+
 ./luac tests/audio.lua > tests/.tmp/audio-jit.out
 printf '%s\n' 'LuaC native audio: OK' > tests/.tmp/audio-expected.out
 cmp tests/.tmp/audio-expected.out tests/.tmp/audio-jit.out

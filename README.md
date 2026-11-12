@@ -97,8 +97,8 @@ Audio buffers содержат native interleaved float32 PCM. Доступны 
 - файлы и процессы через `io.open/read/write/lines/seek/setvbuf/popen`, стандартные потоки и детерминированное закрытие;
 - `os.date/time/difftime/getenv/remove/rename/tmpname/execute/exit/setlocale`;
 - native modules через `package.preload`, `package.loaded` и `require`; статические `require("module")` автоматически находят соседние `.lua`/`init.lua` и связываются в JIT/AOT binary;
-- **16 дополнительных native-модулей / 188 API**: `text`, `hex`, `base64`, `url`, `json`, `hash`, `fs`, `path`, `time`, `vec`, `socket`, `http`, `audio`, `engine`, `coroutine`, `ffi`;
-- TCP/UDP/DNS, verified HTTPS через mbedTLS, PCM/WAV/synthesis/mixing/effects и optional native playback доступны и в JIT, и в AOT;
+- **17 дополнительных native-модулей / 197 API**: `text`, `hex`, `base64`, `url`, `json`, `hash`, `fs`, `path`, `time`, `vec`, `socket`, `http`, `audio`, `engine`, `coroutine`, `ffi`, `websocket`;
+- TCP/UDP/DNS, verified HTTPS и WebSocket client/server (`ws`/`wss`) через mbedTLS, PCM/WAV/synthesis/mixing/effects и optional native playback доступны и в JIT, и в AOT;
 - binary files, JSON Unicode, SHA-256/HMAC, vector math и scene simulation также работают без внешних dependencies;
 - signed int64 и float subtypes, stackful `coroutine.create/resume/yield/wrap`, periodic cycle collection и weak tables.
 
@@ -132,7 +132,7 @@ print(next(5), next(2)) -- 15  17
 | Runtime `load`, `loadstring`, `dofile` | Ещё не реализованы; compilation происходит через compiler API/CLI |
 | `require` | `package.preload` и compile-time связывание literal disk imports; динамический module name требует preload |
 | FFI | Базовый `ffi.open/close/call`, typed signatures через system libffi runtime; structs/callbacks/varargs не поддержаны |
-| HTTPS/TLS | Настоящий mbedTLS, CA и hostname verification; optional build dependency |
+| HTTPS/TLS/WebSocket | Настоящий mbedTLS, CA и hostname verification; `ws`/`wss` client и server, optional TLS build dependency |
 | Audio | Native PCM/WAV/DSP работают; playback через miniaudio включается опционально |
 | Engine | Native 2D world/simulation и Studio viewport работают; physics solver/asset pipeline не заявляются готовыми |
 | `debug` library, `string.dump`, `string.pack/unpack/packsize` | Ещё не реализованы |
@@ -295,7 +295,7 @@ SANITIZE=1 make test  # дополнительно ASan/UBSan, если комп
 - `src/luac_tls.h` — mbedTLS transport и certificate verification;
 - `src/luac_audio.h`, `src/third_party/miniaudio.h` — PCM/WAV/DSP и optional playback;
 - `src/engine.hpp` — header-only C++17 world/scene library для Studio и embedding;
-- `docs/LIBRARIES.md` — справочник по 188 native APIs;
+- `docs/LIBRARIES.md` — справочник по 197 native APIs;
 - `CMakeLists.txt`, `cmake/` — build/install/export package и AOT CTest;
 - `examples/embed/` — независимый consumer для CMake package;
 - `gui/` — Nuklear editor, command→geometry adapter, desktop Vulkan renderer и GLSL shaders;

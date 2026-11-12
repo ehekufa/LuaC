@@ -989,13 +989,14 @@ static LcValue lc_engine_camera(LcContext *ctx,LcFunction *self,int argc,LcValue
 static LcValue lc_engine_project(LcContext *ctx,LcFunction *self,int argc,LcValue *argv){LcValue camera;double x,y,zoom,cx,cy;(void)self;if(argc<1||!lc_engine_world(ctx,argv[0]))return lc_nil();x=lc_lib_number_arg(ctx,argc,argv,1,0);y=lc_lib_number_arg(ctx,argc,argv,2,0);camera=lc_engine_get(ctx,argv[0],"camera");cx=lc_engine_number(ctx,camera,"x",0);cy=lc_engine_number(ctx,camera,"y",0);zoom=lc_engine_number(ctx,camera,"zoom",1);lc_release(ctx,camera);if(zoom==0)zoom=1;return !strcmp(lc_lib_name(self),"world_to_screen")?lc_vec_pair(ctx,(x-cx)*zoom,(y-cy)*zoom):lc_vec_pair(ctx,x/zoom+cx,y/zoom+cy);}
 
 #include "luac_ffi.h"
+#include "luac_websocket.h"
 
 /* --------------------------- library registration ----------------------- */
 static void lc_lib_register(LcContext *ctx,const char *name,LcValue table){
     LcValue package,loaded;lc_set_global(ctx,name,lc_retain(table));package=lc_engine_get(ctx,ctx->globals,"package");loaded=lc_engine_get(ctx,package,"loaded");lc_set_field(ctx,loaded,name,table);lc_release(ctx,loaded);lc_release(ctx,package);
 }
 static void lc_register_libraries(LcContext *ctx) {
-    LcValue ffi=lc_table(ctx),text=lc_table(ctx),hex=lc_table(ctx),base64=lc_table(ctx),url=lc_table(ctx),json=lc_table(ctx),hash=lc_table(ctx),fs=lc_table(ctx),path=lc_table(ctx),clock=lc_table(ctx),vec=lc_table(ctx),net=lc_table(ctx),http=lc_table(ctx),engine=lc_table(ctx);
+    LcValue websocket=lc_table(ctx),ffi=lc_table(ctx),text=lc_table(ctx),hex=lc_table(ctx),base64=lc_table(ctx),url=lc_table(ctx),json=lc_table(ctx),hash=lc_table(ctx),fs=lc_table(ctx),path=lc_table(ctx),clock=lc_table(ctx),vec=lc_table(ctx),net=lc_table(ctx),http=lc_table(ctx),engine=lc_table(ctx);
     const char *simple[]={"trim","ltrim","rtrim","reverse","capitalize","title","swapcase",NULL};
     const char *predicates[]={"startswith","endswith","contains","find","count",NULL};
     const char *binary_vec[]={"add","sub","mul","dot","cross","distance","distance2","lerp",NULL};
@@ -1024,6 +1025,7 @@ static void lc_register_libraries(LcContext *ctx) {
     {const char *mutations[]={"set_position","set_velocity","set_size","translate","set_rotation","rotate","set_scale","set_angular_velocity","set_active",NULL};for(i=0;mutations[i];++i)lc_add_native(ctx,engine,mutations[i],lc_engine_mutate);}lc_lib_register(ctx,"engine",engine);
     { LcValue co_lib=lc_table(ctx);
       lc_add_native(ctx,co_lib,"create",lc_builtin_coroutine_create);lc_add_native(ctx,co_lib,"resume",lc_builtin_coroutine_resume);lc_add_native(ctx,co_lib,"yield",lc_builtin_coroutine_yield);lc_add_native(ctx,co_lib,"wrap",lc_builtin_coroutine_wrap);lc_add_native(ctx,co_lib,"status",lc_builtin_coroutine_status);lc_add_native(ctx,co_lib,"running",lc_builtin_coroutine_running);lc_add_native(ctx,co_lib,"isyieldable",lc_builtin_coroutine_isyieldable);lc_lib_register(ctx,"coroutine",co_lib); }
+    lc_add_native(ctx,websocket,"connect",lc_websocket_connect);lc_add_native(ctx,websocket,"listen",lc_websocket_listen);ctx->websocket_methods=lc_table(ctx);lc_add_native(ctx,ctx->websocket_methods,"accept",lc_websocket_accept);lc_add_native(ctx,ctx->websocket_methods,"send",lc_websocket_send);lc_add_native(ctx,ctx->websocket_methods,"receive",lc_websocket_receive);lc_add_native(ctx,ctx->websocket_methods,"recv",lc_websocket_receive);lc_add_native(ctx,ctx->websocket_methods,"ping",lc_websocket_control);lc_add_native(ctx,ctx->websocket_methods,"pong",lc_websocket_control);lc_add_native(ctx,ctx->websocket_methods,"close",lc_websocket_close);lc_add_native(ctx,ctx->websocket_methods,"settimeout",lc_websocket_timeout);lc_lib_register(ctx,"websocket",websocket);
     lc_add_native(ctx,ffi,"open",lc_ffi_open);lc_add_native(ctx,ffi,"load",lc_ffi_open);lc_add_native(ctx,ffi,"close",lc_ffi_close);lc_add_native(ctx,ffi,"call",lc_ffi_call);lc_lib_register(ctx,"ffi",ffi);
     lc_audio_init(ctx);
 }
