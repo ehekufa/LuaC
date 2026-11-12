@@ -45,6 +45,10 @@ make MBEDTLS=1 MINIAUDIO=1
 ./luac examples/https.lua
 ./luac examples/audio.lua
 
+# macOS/Homebrew (mbedtls keg-only):
+export PKG_CONFIG_PATH="$(brew --prefix mbedtls)/lib/pkgconfig:$PKG_CONFIG_PATH"
+make MBEDTLS=1 MINIAUDIO=1
+
 # Эквивалентная CMake конфигурация:
 cmake -S . -B build -DLUAC_WITH_MBEDTLS=ON -DLUAC_WITH_MINIAUDIO=ON
 cmake --build build -j2
