@@ -48,7 +48,21 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libmbedtls-dev
       - run: make -j2 MBEDTLS=1 MINIAUDIO=1 all libraries
       - name: HTTPS and audio smoke
-        run: ./luac examples/https.lua && ./luac tests/audio.lua && ./tests/run_websocket.sh
+        run: |
+          set +e
+          ./luac examples/https.lua > https-smoke.log 2>&1
+          https_status=$?
+          ./luac tests/audio.lua > audio-smoke.log 2>&1
+          audio_status=$?
+          ./tests/run_websocket.sh > websocket-smoke.log 2>&1
+          websocket_status=$?
+          set -e
+          cat https-smoke.log audio-smoke.log websocket-smoke.log
+          if [ "$https_status" -ne 0 ] || [ "$audio_status" -ne 0 ] || [ "$websocket_status" -ne 0 ]; then
+            message=$(grep -E -C 2 'error:|error generated|undefined|RuntimeError|Assertion|failed' https-smoke.log audio-smoke.log websocket-smoke.log | tail -c 6000 | tr '\r\n' '  ')
+            printf '::error file=examples/https.lua::HTTPS %s, audio %s, WebSocket %s: %s\n' "$https_status" "$audio_status" "$websocket_status" "$message"
+            exit 1
+          fi
       - name: Package
         run: |
           mkdir -p dist/linux
@@ -144,21 +158,23 @@ jobs:
       - run: make -j2 MBEDTLS=1 MINIAUDIO=1 MBEDTLS_CFLAGS="-I$(brew --prefix mbedtls@3)/include" MBEDTLS_LDFLAGS="-L$(brew --prefix mbedtls@3)/lib -lmbedtls -lmbedx509 -lmbedcrypto" all
       - run: make -j2 MBEDTLS=1 MINIAUDIO=1 MBEDTLS_CFLAGS="-I$(brew --prefix mbedtls@3)/include" MBEDTLS_LDFLAGS="-L$(brew --prefix mbedtls@3)/lib -lmbedtls -lmbedx509 -lmbedcrypto" libraries
       - name: HTTPS and audio smoke
+        env:
+          LUAC_CFLAGS: -Wno-deprecated-declarations
         run: |
           set +e
           ./luac examples/https.lua > https-smoke.log 2>&1
           https_status=$?
           ./luac tests/audio.lua > audio-smoke.log 2>&1
+          audio_status=$?
           ./tests/run_websocket.sh > websocket-smoke.log 2>&1
           websocket_status=$?
           ./luac tests/runtime.lua > runtime-smoke.log 2>&1
           runtime_status=$?
-          audio_status=$?
           set -e
           cat https-smoke.log audio-smoke.log websocket-smoke.log runtime-smoke.log
           if [ "$https_status" -ne 0 ] || [ "$audio_status" -ne 0 ] || [ "$websocket_status" -ne 0 ] || [ "$runtime_status" -ne 0 ]; then
-            https_message=$(tail -c 3000 https-smoke.log | tr '\r\n' '  ')
-            audio_message=$(tail -c 3000 audio-smoke.log | tr '\r\n' '  ')
+            https_message=$(grep -E -C 2 'error:|error generated|undefined|RuntimeError|Assertion|failed' https-smoke.log | tail -c 4000 | tr '\r\n' '  ')
+            audio_message=$(grep -E -C 2 'error:|error generated|undefined|RuntimeError|Assertion|failed' audio-smoke.log websocket-smoke.log runtime-smoke.log | tail -c 4000 | tr '\r\n' '  ')
             printf '::error file=examples/https.lua::HTTPS status %s: %s; audio status %s: %s\n' "$https_status" "$https_message" "$audio_status" "$audio_message"
             exit 1
           fi
