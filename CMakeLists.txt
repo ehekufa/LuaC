@@ -20,7 +20,8 @@ target_include_directories(luac_runtime INTERFACE
 set(LUAC_NATIVE_CFLAGS "")
 set(LUAC_NATIVE_LDFLAGS "")
 if(LUAC_WITH_MBEDTLS)
-    find_package(MbedTLS CONFIG REQUIRED)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+    find_package(MbedTLS REQUIRED)
     target_compile_definitions(luac_runtime INTERFACE LUAC_WITH_MBEDTLS)
     target_link_libraries(luac_runtime INTERFACE MbedTLS::mbedtls MbedTLS::mbedx509 MbedTLS::mbedcrypto)
     string(APPEND LUAC_NATIVE_CFLAGS " -DLUAC_WITH_MBEDTLS")
@@ -240,6 +241,8 @@ install(FILES src/runtime.h src/luac_libraries.h src/luac_tls.h src/luac_audio.h
     DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)
 install(DIRECTORY src/third_party DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY src/third_party DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)
+install(FILES cmake/FindMbedTLS.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LuaC)
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/LuaCConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/LuaCConfigVersion.cmake"

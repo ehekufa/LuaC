@@ -22,9 +22,16 @@ jobs:
         run: make -j2 && SANITIZE=1 make test
       - name: CMake package and consumer test
         run: |
-          cmake -S . -B build-cmake -DBUILD_TESTING=ON -DLUAC_WITH_MBEDTLS=ON -DLUAC_WITH_MINIAUDIO=ON -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-cmake -j2
-          ctest --test-dir build-cmake --output-on-failure
+          set +e
+          cmake -S . -B build-cmake -DBUILD_TESTING=ON -DLUAC_WITH_MBEDTLS=ON -DLUAC_WITH_MINIAUDIO=ON -DCMAKE_BUILD_TYPE=Release > cmake-build.log 2>&1 && cmake --build build-cmake -j2 >> cmake-build.log 2>&1 && ctest --test-dir build-cmake --output-on-failure >> cmake-build.log 2>&1
+          status=$?
+          set -e
+          cat cmake-build.log
+          if [ "$status" -ne 0 ]; then
+            message=$(tail -c 6000 cmake-build.log | tr '\r\n' '  ')
+            printf '::error file=CMakeLists.txt::%s\n' "$message"
+            exit "$status"
+          fi
           cmake --install build-cmake --prefix "$GITHUB_WORKSPACE/dist/cmake-prefix"
           cmake -S examples/embed -B build-embed -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/dist/cmake-prefix"
           cmake --build build-embed -j2
@@ -76,7 +83,16 @@ jobs:
         shell: msys2 {0}
         env:
           CC: gcc
-        run: make -j2 MBEDTLS=1 MINIAUDIO=1 all
+        run: |
+          set +e
+          make -j2 MBEDTLS=1 MINIAUDIO=1 all > build-cli.log 2>&1
+          status=$?
+          cat build-cli.log
+          if [ "$status" -ne 0 ]; then
+            message=$(tail -c 6000 build-cli.log | tr '\r\n' '  ')
+            printf '::error file=Makefile::%s\n' "$message"
+            exit "$status"
+          fi
       - name: Build libraries
         shell: msys2 {0}
         env:

@@ -2,7 +2,9 @@
 
 include(CMakeFindDependencyMacro)
 if(@LUAC_WITH_MBEDTLS@)
-    find_dependency(MbedTLS CONFIG)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+    find_dependency(MbedTLS)
+    list(POP_BACK CMAKE_MODULE_PATH)
 endif()
 if(@LUAC_WITH_MINIAUDIO@)
     find_dependency(Threads)
