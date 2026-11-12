@@ -37,7 +37,7 @@ AOT-сборка:
 
 ## HTTPS и native audio
 
-Базовая сборка не требует внешних libraries. HTTPS включается установленным **mbedTLS 3.x**, playback — bundled **miniaudio 0.11.26**:
+Базовая сборка не требует внешних libraries. HTTPS включается установленным **mbedTLS 3.x или 4.x**, playback — bundled **miniaudio 0.11.26**:
 
 ```sh
 # Debian/Ubuntu: sudo apt install libmbedtls-dev
