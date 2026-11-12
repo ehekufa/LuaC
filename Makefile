@@ -15,9 +15,9 @@ NATIVE_LDFLAGS =
 ifeq ($(MBEDTLS),1)
   NATIVE_CFLAGS += -DLUAC_WITH_MBEDTLS $(MBEDTLS_CFLAGS) $(shell pkg-config --cflags mbedtls 2>/dev/null)
   NATIVE_LDFLAGS += $(MBEDTLS_LDFLAGS) $(shell pkg-config --libs mbedtls 2>/dev/null)
-  ifeq ($(strip $(shell pkg-config --libs mbedtls 2>/dev/null)),)
-    NATIVE_LDFLAGS += -lmbedtls -lmbedx509 -lmbedcrypto
-  endif
+  # pkg-config's dynamic output can contain only -lmbedtls. AOT executables
+  # still need the explicit X.509 and crypto link dependencies.
+  NATIVE_LDFLAGS += -lmbedtls -lmbedx509 -lmbedcrypto
   ifeq ($(OS),Windows_NT)
     NATIVE_LDFLAGS += -lcrypt32
   endif

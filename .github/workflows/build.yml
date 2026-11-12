@@ -59,7 +59,7 @@ jobs:
           set -e
           cat https-smoke.log audio-smoke.log websocket-smoke.log
           if [ "$https_status" -ne 0 ] || [ "$audio_status" -ne 0 ] || [ "$websocket_status" -ne 0 ]; then
-            message=$(grep -E -C 2 'error:|error generated|undefined|RuntimeError|Assertion|failed' https-smoke.log audio-smoke.log websocket-smoke.log | tail -c 6000 | tr '\r\n' '  ')
+            message=$(grep -E -C 2 'error:|error generated|undefined|RuntimeError|Assertion|failed' https-smoke.log audio-smoke.log websocket-smoke.log | tail -c 6000 | tr '\r\n' '  ' || true)
             printf '::error file=examples/https.lua::HTTPS %s, audio %s, WebSocket %s: %s\n' "$https_status" "$audio_status" "$websocket_status" "$message"
             exit 1
           fi
@@ -173,8 +173,8 @@ jobs:
           set -e
           cat https-smoke.log audio-smoke.log websocket-smoke.log runtime-smoke.log
           if [ "$https_status" -ne 0 ] || [ "$audio_status" -ne 0 ] || [ "$websocket_status" -ne 0 ] || [ "$runtime_status" -ne 0 ]; then
-            https_message=$(grep -E -C 2 'error:|error generated|undefined|RuntimeError|Assertion|failed' https-smoke.log | tail -c 4000 | tr '\r\n' '  ')
-            audio_message=$(grep -E -C 2 'error:|error generated|undefined|RuntimeError|Assertion|failed' audio-smoke.log websocket-smoke.log runtime-smoke.log | tail -c 4000 | tr '\r\n' '  ')
+            https_message=$(grep -E -C 2 'error:|error generated|undefined|RuntimeError|Assertion|failed' https-smoke.log | tail -c 4000 | tr '\r\n' '  ' || true)
+            audio_message=$(grep -E -C 2 'error:|error generated|undefined|RuntimeError|Assertion|failed' audio-smoke.log websocket-smoke.log runtime-smoke.log | tail -c 4000 | tr '\r\n' '  ' || true)
             printf '::error file=examples/https.lua::HTTPS status %s: %s; audio status %s: %s\n' "$https_status" "$https_message" "$audio_status" "$audio_message"
             exit 1
           fi

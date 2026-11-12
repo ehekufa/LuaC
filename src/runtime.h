@@ -2,6 +2,16 @@
 #define LUAC_RUNTIME_H
 
 /* LuaC runtime: refcount roots, cycle collection, weak tables and native values. */
+#if defined(__APPLE__) && !defined(_WIN32)
+/* Xcode 26 hides ucontext and RTLD_DEFAULT behind these feature macros when
+   the runtime requests POSIX.1-2008 below. */
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+#ifndef _DARWIN_C_SOURCE
+#define _DARWIN_C_SOURCE
+#endif
+#endif
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
 #endif
