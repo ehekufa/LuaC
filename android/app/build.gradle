@@ -7,7 +7,7 @@ android {
 
     defaultConfig {
         applicationId 'com.luac.studio'
-        minSdk 26
+        minSdk 28
         targetSdk 35
         versionCode 3
         versionName '0.3.0'
