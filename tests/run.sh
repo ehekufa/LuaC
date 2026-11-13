@@ -3,6 +3,16 @@ set -eu
 cd "$(dirname "$0")/.."
 mkdir -p tests/.tmp
 
+./luac tests/warn.lua > tests/.tmp/warn-jit.out 2> tests/.tmp/warn-jit.err
+printf '%s\n' 'warn: OK' > tests/.tmp/warn-expected.out
+printf '%s\n' 'Lua warning: hello 42' 'Lua warning: @on ordinary' > tests/.tmp/warn-expected.err
+cmp tests/.tmp/warn-expected.out tests/.tmp/warn-jit.out
+cmp tests/.tmp/warn-expected.err tests/.tmp/warn-jit.err
+./luac --aot tests/warn.lua -o tests/.tmp/warn-aot >/dev/null
+tests/.tmp/warn-aot > tests/.tmp/warn-aot.out 2> tests/.tmp/warn-aot.err
+cmp tests/.tmp/warn-expected.out tests/.tmp/warn-aot.out
+cmp tests/.tmp/warn-expected.err tests/.tmp/warn-aot.err
+
 ./luac --check tests/features.lua >/dev/null
 ./luac tests/features.lua > tests/.tmp/jit.out
 printf '%s\n' 'LuaC tests: OK' > tests/.tmp/expected.out

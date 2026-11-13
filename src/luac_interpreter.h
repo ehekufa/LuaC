@@ -405,24 +405,67 @@ static char *li_read_file(const char *path) {
     if (fread(source, 1, (size_t)size, file) != (size_t)size) { fclose(file); free(source); return NULL; }
     fclose(file); source[size] = 0; return source;
 }
+/* Project search paths are relative to the project root. Reject absolute paths
+   and lexical parent traversal (this is not a symlink security boundary). */
+static int li_safe_search_path(const char *path) {
+    const char *segment = path, *p;
+    if (!*path || *path == '/' || strchr(path, '\\') || strchr(path, ':')) return 0;
+    for (p = path;; ++p) {
+        if (*p == '/' || !*p) {
+            if (p - segment == 2 && segment[0] == '.' && segment[1] == '.') return 0;
+            if (!*p) break;
+            segment = p + 1;
+        }
+    }
+    return 1;
+}
 static char *li_module_path(LiSession *session, const char *name, int main_file) {
-    Str path; size_t i;
-    if (!main_file && (!*name || name[0] == '.' || strstr(name, "..") || strchr(name, '/') || strchr(name, '\\'))) return NULL;
-    sb_init(&path); sb_add(&path, session->root_path); sb_add(&path, "/");
-    if (main_file) sb_add(&path, "main.lua");
-    else {
-        for (i = 0; name[i]; ++i) { char c = name[i] == '.' ? '/' : name[i]; sb_n(&path, &c, 1); }
-        sb_add(&path, ".lua");
+    Str path, module_name;
+    LcValue package, key, patterns;
+    const char *start, *end;
+    size_t i;
+    if (main_file) {
+        sb_init(&path); sb_add(&path, session->root_path); sb_add(&path, "/main.lua");
+        return path.data;
     }
-    if (!main_file && access(path.data, R_OK) != 0) {
-        path.len -= 4; path.data[path.len] = 0; sb_add(&path, "/init.lua");
+    if (!*name || name[0] == '.' || strstr(name, "..") || strchr(name, '/') || strchr(name, '\\')) return NULL;
+    sb_init(&module_name);
+    for (i = 0; name[i]; ++i) { char c = name[i] == '.' ? '/' : name[i]; sb_n(&module_name, &c, 1); }
+    package = li_global(session, "package");
+    key = lc_string(session->ctx, "path");
+    patterns = lc_table_get(session->ctx, package, key);
+    lc_release(session->ctx, key); lc_release(session->ctx, package);
+    if (patterns.type != LC_STRING) {
+        lc_release(session->ctx, patterns); sb_free(&module_name);
+        lc_error(session->ctx, "package.path must be a string"); return NULL;
     }
-    return path.data;
+    start = patterns.as.string->data;
+    while (*start) {
+        Str candidate;
+        end = strchr(start, ';'); if (!end) end = start + strlen(start);
+        sb_init(&candidate);
+        for (; start < end; ++start) {
+            if (*start == '?') sb_add(&candidate, module_name.data);
+            else sb_n(&candidate, start, 1);
+        }
+        if (candidate.data && li_safe_search_path(candidate.data)) {
+            sb_init(&path); sb_add(&path, session->root_path); sb_add(&path, "/"); sb_add(&path, candidate.data);
+            sb_free(&candidate);
+            if (access(path.data, R_OK) == 0) {
+                lc_release(session->ctx, patterns); sb_free(&module_name); return path.data;
+            }
+            sb_free(&path);
+        } else sb_free(&candidate);
+        if (!*end) break;
+        start = end + 1;
+    }
+    lc_release(session->ctx, patterns); sb_free(&module_name);
+    return NULL;
 }
 static LiModule *li_parse_module(LiSession *session, const char *name, int main_file) {
     LiModule *module;
     char *path = li_module_path(session, name, main_file), *source;
-    if (!path) { lc_error(session->ctx, "invalid module name '%s'", name); return NULL; }
+    if (!path) { if (!session->ctx->error) lc_error(session->ctx, "module '%s' not found in project package.path", name); return NULL; }
     source = li_read_file(path);
     if (!source) { lc_error(session->ctx, "module '%s' not found at %s", main_file ? "main" : name, path); free(path); return NULL; }
     module = (LiModule *)calloc(1, sizeof(*module));
@@ -446,7 +489,7 @@ static LcValue li_execute_module(LiSession *session, LiModule *module) {
 static LcValue li_require(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
     LiSession *session = li_current;
     const char *name;
-    LcValue loaded, key, result;
+    LcValue loaded, key, result, preload, loader;
     LiModule *module;
     if (!argc || lc_first_value(argv[0]).type != LC_STRING) { lc_error(ctx,"module name expected");return lc_nil(); }
     if (lc_native_module_name(lc_first_value(argv[0]).as.string->data))
@@ -456,12 +499,26 @@ static LcValue li_require(LcContext *ctx, LcFunction *self, int argc, LcValue *a
     result = lc_table_get(ctx, loaded, key);
     if (lc_truthy(result)) { lc_release(ctx,loaded);lc_release(ctx,key);return result; }
     lc_release(ctx, result);
+    /* Project require must honor package.preload just like the native runner. */
+    preload = lc_package_table(ctx, "preload");
+    loader = lc_table_get(ctx, preload, key);
+    lc_release(ctx, preload);
+    if (loader.type == LC_FUNCTION) {
+        lc_release(ctx, loader); lc_release(ctx, loaded); lc_release(ctx, key);
+        return lc_builtin_require(ctx, self, argc, argv);
+    }
+    lc_release(ctx, loader);
     lc_table_set(ctx, loaded, key, lc_bool(1));
     module = li_parse_module(session, name, 0);
     result = module ? li_execute_module(session, module) : lc_nil();
-    if (!ctx->error && result.type != LC_NIL) lc_table_set(ctx, loaded, key, result);
+    if (ctx->error) lc_table_set(ctx, loaded, key, lc_nil());
+    else if (result.type != LC_NIL) lc_table_set(ctx, loaded, key, result);
     lc_release(ctx, result);
     result = lc_table_get(ctx, loaded, key);
+    if (!ctx->error && result.type == LC_NIL) {
+        lc_release(ctx, result); result = lc_bool(1);
+        lc_table_set(ctx, loaded, key, result);
+    }
     lc_release(ctx, loaded); lc_release(ctx, key); return result;
 }
 static void li_json_string(Str *json, const char *text) {
@@ -594,8 +651,9 @@ LUAC_API void *luac_project_open(const char *root_path, char **error_message) {
     if (!root_path || !*root_path) { if(error_message)*error_message=xstrdup("project path required");return NULL; }
     session = (LiSession *)calloc(1,sizeof(*session));
     if (!session) { if(error_message)*error_message=xstrdup("out of memory");return NULL; }
-    session->root_path = xstrdup(root_path);
     session->previous_cwd = getcwd(cwd,sizeof(cwd)) ? xstrdup(cwd) : NULL;
+    if (root_path[0] == '/' || root_path[0] == '\\' || (root_path[0] && root_path[1] == ':') || !session->previous_cwd) session->root_path = xstrdup(root_path);
+    else { Str absolute; sb_init(&absolute); sb_add(&absolute, session->previous_cwd); sb_add(&absolute, "/"); sb_add(&absolute, root_path); session->root_path = absolute.data; }
     if (chdir(root_path) != 0) {
         if(error_message){Str message;sb_init(&message);sb_printf(&message,"cannot open project: %s",strerror(errno));*error_message=message.data;}
         free(session->previous_cwd);free(session->root_path);free(session);return NULL;
@@ -604,6 +662,9 @@ LUAC_API void *luac_project_open(const char *root_path, char **error_message) {
     session->root = li_env_new(NULL); session->budget = 1000000; li_current = session;
     require = lc_function_new(session->ctx,li_require,0,NULL,"project require");
     li_set_global(session,"require",require);
+    { LcValue package = li_global(session, "package");
+      lc_set_field(session->ctx, package, "path", lc_string(session->ctx, "./?.lua;./?/init.lua"));
+      lc_release(session->ctx, package); }
     main_module = li_parse_module(session,"main",1);
     if (main_module && !session->ctx->error) {
         LcValue ignored = li_execute_module(session,main_module);lc_release(session->ctx,ignored);

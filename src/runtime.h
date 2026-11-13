@@ -208,6 +208,7 @@ struct LcContext {
     const char *source;
     char message[1024];
     /* Optional embedder-owned print capture (Android project runner). */
+    int warnings_enabled; /* Lua 5.4 warnings start disabled in the default handler. */
     int capture_output;
     char *captured_output;
     size_t captured_length, captured_capacity;
@@ -1209,6 +1210,43 @@ static LcValue lc_builtin_print(LcContext *ctx, LcFunction *self, int argc, LcVa
         lc_release(ctx, s);
     }
     lc_print_bytes(ctx, "\n", 1); fflush(stdout); return lc_nil();
+}
+
+/* Lua's default warning handler writes to stderr and recognizes @on/@off.
+   Embedded projects capture warnings alongside print so users can see them. */
+static LcValue lc_builtin_warn(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    int i;
+    (void)self;
+    if (!argc) { lc_error(ctx, "bad argument #1 to 'warn' (string expected)"); return lc_nil(); }
+    for (i = 0; i < argc; ++i) {
+        LcValue v = lc_first_value(argv[i]);
+        if (v.type != LC_STRING && v.type != LC_NUMBER && v.type != LC_INTEGER) {
+            lc_error(ctx, "bad argument #%d to 'warn' (string expected)", i + 1);
+            return lc_nil();
+        }
+    }
+    if (argc == 1 && lc_first_value(argv[0]).type == LC_STRING) {
+        LcString *s = lc_first_value(argv[0]).as.string;
+        if (s->length && s->data[0] == '@') {
+            if (s->length == 3 && !memcmp(s->data, "@on", 3)) ctx->warnings_enabled = 1;
+            else if (s->length == 4 && !memcmp(s->data, "@off", 4)) ctx->warnings_enabled = 0;
+            return lc_nil();
+        }
+    }
+    if (!ctx->warnings_enabled) return lc_nil();
+    if (ctx->capture_output) lc_print_bytes(ctx, "Lua warning: ", 13);
+    else fputs("Lua warning: ", stderr);
+    for (i = 0; i < argc; ++i) {
+        LcValue s = lc_to_string(ctx, lc_first_value(argv[i]));
+        if (s.type == LC_STRING) {
+            if (ctx->capture_output) lc_print_bytes(ctx, s.as.string->data, s.as.string->length);
+            else fwrite(s.as.string->data, 1, s.as.string->length, stderr);
+        }
+        lc_release(ctx, s);
+    }
+    if (ctx->capture_output) lc_print_bytes(ctx, "\n", 1);
+    else { fputc('\n', stderr); fflush(stderr); }
+    return lc_nil();
 }
 
 static LcValue lc_builtin_type(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
@@ -2836,6 +2874,7 @@ static LcContext *lc_context_new(const char *source) {
     ctx->gc_enabled = 1;
     ctx->globals = lc_table(ctx);
     lc_set_global(ctx, "print", lc_function_new(ctx, lc_builtin_print, 0, NULL, "print"));
+    lc_set_global(ctx, "warn", lc_function_new(ctx, lc_builtin_warn, 0, NULL, "warn"));
     lc_set_global(ctx, "type", lc_function_new(ctx, lc_builtin_type, 0, NULL, "type"));
     lc_set_global(ctx, "tostring", lc_function_new(ctx, lc_builtin_tostring, 0, NULL, "tostring"));
     lc_set_global(ctx, "tonumber", lc_function_new(ctx, lc_builtin_tonumber, 0, NULL, "tonumber"));
