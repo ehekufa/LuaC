@@ -1,0 +1,56 @@
+local immutable <const> = 9
+assert(immutable == 9)
+local badConst, constError = load("local x <const> = 1; x = 2")
+assert(badConst == nil and type(constError) == "string")
+local constantReader = assert(load("local x <const> = 15; return function() return x end"))()
+assert(constantReader() == 15)
+-- Text chunk loading in the embedded project runtime.
+local chunk, err = load("return ...", "dynamic_chunk", "t")
+assert(chunk, err)
+local a, b = chunk(12, 34)
+assert(a == 12 and b == 34)
+local nested = assert(loadstring("return function() return 23 end"))()
+assert(nested() == 23)
+dynamicUpdate = nested
+local failing = assert(load("error('dynamic failure')"))
+assert(not pcall(failing))
+assert(load("return @") == nil)
+local bad, syntax = load("local =", "bad_chunk")
+assert(bad == nil and type(syntax) == "string")
+assert(load("return 1", nil, "b") == nil)
+assert(load("return 1" .. string.char(0) .. "garbage") == nil)
+local missing, why = loadfile("custom/missing.lua")
+assert(missing == nil and type(why) == "string")
+assert(not pcall(dofile, "custom/missing.lua"))
+local filechunk = assert(loadfile("custom/loadfile.lua"))
+assert(filechunk() == 91)
+assert(dofile("custom/loadfile.lua") == 91)
+assert(not pcall(load, "return 1", nil, "t", {}))
+print("Dynamic text chunks OK")
+-- Dynamic names and user preloads are supported by the embedded runner.
+package.preload['virtual'] = function(name) return { name = name } end
+package.path = 'absent/?.lua;custom/?.lua;./?.lua;./?/init.lua'
+local diskName = 'dy' .. 'namic'
+assert(require(diskName) == 73)
+assert(require('custom.nothing') == true)
+assert(require('custom.nothing') == true)
+local dynamicName = 'vir' .. 'tual'
+assert(require(dynamicName).name == 'virtual')
+assert(not pcall(require, 'missing.module'))
+assert(not pcall(require, 'missing.module')) -- failure must not be cached
+warn('@on')
+warn('Embedded ', 'warning')
+warn('@off')
+require('settings')
+local player = require('scripts.player')
+world = engine.world()
+engine.set_gravity(world, 0, 100)
+local texture, textureError = engine.load_texture('assets/luac_logo.png')
+assert(texture, textureError)
+hero = player.create(world, texture)
+engine.text(world, projectName, 10, 20, 18)
+function update(dt)
+  assert(dynamicUpdate() == 23)
+  player.update(hero, dt)
+end
+print('Project started:', projectName)

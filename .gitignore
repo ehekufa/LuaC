@@ -1,0 +1,16 @@
+/luac
+/luac.exe
+a.luac.c
+tests/.tmp/
+*.so
+*.o
+core
+build/
+/build-*/
+dist/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+*.aab

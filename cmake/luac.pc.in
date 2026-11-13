@@ -1,0 +1,11 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+runtimedir=${prefix}/@CMAKE_INSTALL_DATADIR@/luac
+
+Name: LuaC
+Description: Independent Lua-syntax native compiler library without a VM
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lluac
+Cflags: -I${includedir} -I${runtimedir}

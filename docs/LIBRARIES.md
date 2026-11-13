@@ -1,0 +1,203 @@
+# LuaC 0.5 native libraries
+
+Все перечисленные функции реализованы в `src/luac_libraries.h` и компилируются в тот же native C executable/shared library, что и программа. Lua VM, динамический plugin loader и внешняя `liblua` не используются.
+
+Модули доступны двумя способами:
+
+```lua
+local encoded = json.encode({answer = 42})
+local sameJson = require("json") -- встроенный module, уже находится в package.loaded
+assert(sameJson == json)
+```
+
+17 модулей содержат **197 callable API** (без подсчёта alias `net`). Существующие `string`, `table`, `math`, `bit`, `bit32`, `utf8`, `io` и `os` также остаются доступны.
+
+## Modules, integers, coroutines and memory
+
+Literal `require("player.stats")` ищет `player/stats.lua` и `player/stats/init.lua` относительно исходного entry file, затем в текущей директории компиляции. Найденные modules рекурсивно компилируются в тот же executable; после AOT сборки исходные `.lua` файлы при запуске не нужны. `package.preload` сохраняется для built-ins и вычисляемых/dynamic imports.
+
+Integer literals и integer arithmetic сохраняют signed 64-bit значения, включая точные table keys и bitwise operations. `math.type`, `math.tointeger`, `math.maxinteger` и `math.mininteger` различают integer/float. Деление `/` возвращает float; `//` и `%` используют floor semantics.
+
+`coroutine`: `create`, `resume`, `yield`, `wrap`, `status`, `running`, `isyieldable`. Реализация stackful: `yield` работает во вложенных функциях и сохраняет locals. Unix использует `ucontext`, Windows — native Fibers. Ошибка внутри coroutine возвращается из `resume` как `false, message`; `wrap` повторно выбрасывает её.
+
+`collectgarbage("collect")` освобождает недостижимые reference cycles во время работы программы. `__mode="k"`, `"v"` и `"kv"` включают weak keys/values. Также доступны `step`, `stop`, `restart`, `isrunning`, `count`.
+
+## WebSocket client and server
+
+```lua
+local ws = assert(websocket.connect("wss://example.com/chat"))
+ws:settimeout(2)
+ws:send("Привет", "text")
+local message, kind = ws:receive()
+ws:ping("keepalive")
+ws:close()
+```
+
+`websocket.connect(url)` поддерживает `ws://` и verified `wss://`. CA и verification настраиваются теми же `http.setca`/`http.setverify`, что и HTTPS. `receive()` возвращает `message, "text"|"binary"`; ping автоматически получает pong, fragmented messages собираются до результата, close возвращает `nil, "close"`. Binary strings сохраняют NUL bytes. Методы: `send`, `receive`/`recv`, `ping`, `pong`, `settimeout`, `close`.
+
+```lua
+local listener = assert(websocket.listen("0.0.0.0", 8080))
+local peer = listener:accept()
+local message = peer:receive()
+peer:send("echo:" .. message, "text")
+peer:close(); listener:close()
+```
+
+Для TLS server передайте `{tls=true, certificate="server.pem", private_key="key.pem"}` в `websocket.listen`. Plain `ws` и `wss` используют один RFC 6455 frame codec с masking, continuation frames и control payload limit 125 bytes. Есть лимит 64 MiB на сообщение; compression/extensions и permessage-deflate пока не поддерживаются. Для `wss` требуется сборка с mbedTLS.
+
+## Basic native FFI
+
+```lua
+local m = assert(ffi.open("libm.so.6"))
+local value = ffi.call(m, "cos", "double(double)", 0)
+assert(value == 1)
+ffi.close(m)
+```
+
+`ffi.open`/`ffi.load` загружает обычную `.dll`, `.so` или `.dylib`; `ffi.call(library, symbol, signature, ...)` вызывает exported C function. Поддержаны `void`, `bool`, signed/unsigned 8/16/32/64-bit integers, `int`, `uint`, `size_t`, `ptrdiff_t`, `float`, `double`, `pointer`/`ptr` и `string`, до 16 аргументов. String arguments передаются как temporary NUL-terminated `const char *`; pointers представлены int64 addresses.
+
+Для вызовов используется системный **libffi runtime**, обнаруживаемый через dynamic loader; headers и link-time `-lffi` не нужны. На Linux обычно требуется пакет `libffi8`. Если runtime отсутствует, вызов завершается понятной ошибкой. Struct-by-value, callbacks в Lua, C varargs и platform-specific ABI attributes пока не поддерживаются. Как и в LuaJIT FFI, неверная signature или pointer может повредить процесс — это низкоуровневый unsafe API.
+
+## Data and text
+
+| Module | Functions |
+|---|---|
+| `text` | `trim`, `ltrim`, `rtrim`, `reverse`, `capitalize`, `title`, `swapcase`, `startswith`, `endswith`, `contains`, `find`, `count`, `split`, `join`, `replace`, `lpad`, `rpad`, `center`, `repeat` |
+| `hex` | `encode`, `decode`; encode принимает optional `"upper"` |
+| `base64` | `encode`, `decode`; decoder принимает стандартный и URL-safe alphabet, игнорирует whitespace |
+| `url` | `encode`, `decode`, `queryencode`, `querydecode`, `parse`, `build` |
+| `json` | `encode`, `decode`; nested arrays/objects, escapes, UTF-16 surrogate pairs, ограничение глубины |
+| `hash` | `crc32`, `adler32`, `fnv1a`, `djb2`, `sha256`, `sha256raw`, `hmac_sha256` |
+
+`json.decode` возвращает `nil, message` для malformed input. JSON `null` отображается в Lua `nil`; как и в обычной Lua table, array с `null` в середине не сохраняет hole как отдельное значение. CRC/Adler/FNV/DJB2 предназначены для checksums, не для password hashing. SHA-256 и HMAC реализованы непосредственно в LuaC.
+
+```lua
+local body = json.encode({name = "LuaC", values = {1, 2, 3}})
+local decoded, err = json.decode(body)
+assert(decoded and decoded.values[3] == 3)
+assert(hash.sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+```
+
+## Filesystem, paths and time
+
+| Module | Functions |
+|---|---|
+| `fs` | `stat`, `exists`, `isfile`, `isdir`, `size`, `modified`, `list`/`listdir`, `mkdir`, `mkdirs`, `rmdir`, `chdir`, `getcwd`, `remove`, `rename`, `readfile`, `writefile`, `appendfile`, `copyfile`, `touch` |
+| `path` | `basename`, `dirname`, `extension`/`ext`, `stem`, `join`, `isabsolute`, `normalize`, `absolute` |
+| `time` | `now`, `monotonic`, `ticks`, `millis`, `sleep`, `iso`, `localiso`, `parts`, `localparts` |
+
+`readfile`/`writefile` работают в binary mode и сохраняют нулевые байты. `path.normalize` — лексическая операция, не разрешает symlinks. `time.monotonic` не зависит от перевода системных часов.
+
+## Vector math
+
+`vec`: `add`, `sub`, `mul`, `dot`, `cross`, `distance`, `distance2`, `lerp`, `length`, `length2`, `normalize`, `scale`, `perpendicular`, `angle`, `rotate`, `clamp`, `reflect`.
+
+Вектор представлен двумя return values:
+
+```lua
+local x, y = vec.normalize(3, 4) -- 0.6, 0.8
+local rx, ry = vec.rotate(10, 0, math.pi / 2)
+```
+
+## TCP, UDP and DNS
+
+`socket` (и alias `net`):
+
+- constructors: `tcp()`, `udp()`;
+- convenience: `connect(host, port)`, `bind(host, port)` (TCP listener), `select(read, write, timeout)`;
+- DNS: `resolve(host)`, `addresses(host)`, `gethostname()`;
+- methods: `connect`, `bind`, `listen`, `accept`, `send`, `receive`/`recv`, `sendto`, `receivefrom`/`recvfrom`, `close`, `settimeout`, `setoption`, `getsockname`, `getpeername`, `shutdown`.
+
+`receive` принимает byte count, `"*a"` или `"*l"`. `setoption` поддерживает `nonblocking`, `reuseaddr`, `reuseport` (если ОС предоставляет), `broadcast`, `keepalive`, `nodelay`. Socket objects являются ownership-managed userdata: последний release или shutdown контекста автоматически закрывает descriptor; на Windows Winsock инициализируется и освобождается вместе с контекстом.
+
+```lua
+local server = socket.bind("127.0.0.1", 8080)
+local client = socket.connect("127.0.0.1", 8080)
+client:send("hello")
+local peer = server:accept()
+assert(peer:receive(5) == "hello")
+peer:close(); client:close(); server:close()
+```
+
+## HTTP
+
+- `http.get(url)`;
+- `http.post(url, body, content_type)`;
+- `http.request(url, method, body, content_type)`;
+- `http.tls_available()`;
+- `http.setca(pem_path)` — выбрать доверенный CA bundle вместо системного;
+- `http.setverify(boolean)` — verification включена по умолчанию; отключение возможно только явно и не рекомендуется.
+
+Возврат: `body, status, headers`. Header names приводятся к lowercase. Поддерживаются Content-Length/close-delimited responses и chunked transfer decoding. При сборке с `LUAC_WITH_MBEDTLS` схема `https://` использует настоящий mbedTLS handshake, проверку цепочки сертификата и hostname. Linux/macOS читают системный CA bundle, Windows — ROOT certificate store. Ошибка TLS никогда не вызывает незаметный переход на plaintext. Без backend возвращается `nil, message`.
+
+```lua
+assert(http.tls_available())
+local body, status = http.get("https://github.com/")
+assert(body and status == 200)
+-- Для частной PKI: http.setca("/path/to/private-ca.pem")
+```
+
+## Native audio
+
+Модуль `audio` работает с ownership-managed userdata: interleaved float32 PCM, samples нормализованы в `[-1, 1]`. DSP и WAV не требуют ни backend, ни аудиоустройства.
+
+- constructors/I/O: `silence(seconds, rate=44100, channels=1)`, `tone(frequency, seconds, options)`, `load(path)`, `mix(...)`;
+- metadata: `info`, `frames`, `channels`, `sample_rate`, `duration`;
+- sample access: `get(frame, channel=1)`, `set(frame, channel, sample)` (индексы с 1);
+- processing: `gain`, `fade`, `normalize`, `lowpass`, `highpass`, `delay`, `resample`;
+- playback: `play`, `wait`, `stop`, `playback_available()`; `wait` возвращает `false`, если device не завершил buffer за его duration + 2 секунды;
+- `save(path)` пишет PCM16 WAV, `save(path, "float")` — float32 WAV.
+
+`tone` options: `sample_rate`, `channels`, `amplitude`, `attack`, `release`, `pan`, `waveform` (`sine`, `square`, `saw`, `triangle`, `noise`). `load` читает RIFF/WAVE PCM 8/16/24/32-bit и float32. `mix` требует одинаковые sample rate/channel count и дополняет короткие buffers тишиной. Processing methods изменяют buffer и возвращают его для chaining; `resample` и `mix` создают новый buffer.
+
+Playback включается `LUAC_WITH_MINIAUDIO` и использует default native device через bundled miniaudio. При отсутствии backend или устройства `play` возвращает `nil, message`; остальные audio functions продолжают работать.
+
+## Lua scene engine
+
+`engine` работает с обычными ownership-managed Lua tables:
+
+- world: `world`, `clear`, `count`, `list`, `ids`, `find`, `destroy`;
+- entities: `create`/`entity`, `set_position`, `set_velocity`, `set_size`, `translate`, `set_rotation`, `rotate`, `set_scale`, `set_angular_velocity`, `set_active`, `set_color`;
+- simulation: `update`, `pause`, `resume`, `set_gravity`, `set_body`, `bounds`, `intersects`, `collisions`;
+- rendering data: `load_texture` (PNG/JPEG → RGBA), `set_sprite`, UTF-8 `text`, `clear_text`;
+- input: `inject_key`, `inject_mouse`, `inject_touch`, `clear_input` и query functions `is_key_down`, `is_key_pressed`, `mouse_pos`, `is_mouse_down`, `is_mouse_clicked`, `touch_pos`;
+- data: `add_component`, `get_component`, `remove_component`, `add_tag`, `remove_tag`, `has_tag`;
+- camera: `camera`, `world_to_screen`, `screen_to_world`.
+
+```lua
+local world = engine.world()
+local player = engine.create(world, "Player", 0, 0)
+engine.set_velocity(player, 20, 0)
+engine.set_body(player, { restitution = 0.4, friction = 0.8 })
+engine.set_gravity(world, 0, 900)
+local texture = assert(engine.load_texture("assets/player.png"))
+engine.set_sprite(player, texture, 44, 44)
+engine.text(world, "Привет, мир", 20, 30, 24)
+engine.add_component(player, "health", 100)
+engine.add_tag(player, "player")
+engine.update(world, 1 / 60)
+```
+
+## C++ engine embedding
+
+`src/engine.hpp` — самостоятельный C++17 header-only API, не зависящий от Lua runtime, Vulkan или Studio:
+
+```cmake
+find_package(LuaC 0.5 CONFIG REQUIRED)
+add_executable(my_game main.cpp)
+target_link_libraries(my_game PRIVATE LuaC::engine)
+```
+
+```cpp
+#include <engine.hpp>
+luac::engine::World world;
+auto &player = world.create("Player", {0, 0});
+player.body.velocity = {20, 0};
+world.advance(1.0 / 60.0); // deterministic fixed steps
+```
+
+`set_body` принимает `gravity_scale`, `gravity_x`, `gravity_y`, `restitution`, `friction`, `damping`, `kinematic`, `solid` и `grounded`; вызов включает `solid` по умолчанию, а `{solid=false}` оставляет только collision queries.
+
+`World` включает stable entity IDs, transforms, bodies, sprites, tags, numeric components, camera, AABB collisions, gravity/damping, restitution/friction, grounded state, play/pause/step и bounded fixed-step catch-up. `InputState` хранит keyboard/mouse/wheel/touch transitions, а `overlayText` — экранный UTF-8 text.
+
+`set_body` включает opt-in solid response; без него сохраняется legacy linear movement и collision queries. Physics — deterministic sequential AABB solver для небольших 2D worlds, без rotation-aware contacts и полноценного rigid-body dynamics. `load_texture` декодирует PNG/JPEG и возвращает `{width, height, channels, pixels}`; decoded bytes не привязаны к GPU context. Studio загружает sprite textures в Vulkan, использует embedded IBM Plex Mono glyph atlas для Unicode UI/scene text и передаёт GLFW keyboard/mouse/wheel в native `InputState`. Touch injection доступен через Lua API; отдельный mobile callback layer остаётся platform integration.

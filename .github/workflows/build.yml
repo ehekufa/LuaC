@@ -1,0 +1,299 @@
+name: Native builds
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  test:
+    name: Tests and sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: mbedTLS dependency
+        run: sudo apt-get update && sudo apt-get install -y libmbedtls-dev
+      - name: Build and test
+        run: make -j2 && SANITIZE=1 make test
+      - name: CMake package and consumer test
+        run: |
+          set +e
+          cmake -S . -B build-cmake -DBUILD_TESTING=ON -DLUAC_WITH_MBEDTLS=ON -DLUAC_WITH_MINIAUDIO=ON -DCMAKE_BUILD_TYPE=Release > cmake-build.log 2>&1 && cmake --build build-cmake -j2 >> cmake-build.log 2>&1 && ctest --test-dir build-cmake --output-on-failure >> cmake-build.log 2>&1
+          status=$?
+          set -e
+          cat cmake-build.log
+          if [ "$status" -ne 0 ]; then
+            message=$(tail -c 6000 cmake-build.log | tr '\r\n' '  ')
+            printf '::error file=CMakeLists.txt::%s\n' "$message"
+            exit "$status"
+          fi
+          cmake --install build-cmake --prefix "$GITHUB_WORKSPACE/dist/cmake-prefix"
+          cmake -S examples/embed -B build-embed -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/dist/cmake-prefix"
+          cmake --build build-embed -j2
+          ./build-embed/luac-embed-compiler
+          ./build-embed/luac-embed-native
+          ./build-embed/luac-embed-engine
+
+  linux:
+    name: Linux CLI and libraries
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libmbedtls-dev
+      - run: make -j2 MBEDTLS=1 MINIAUDIO=1 all libraries
+      - name: HTTPS and audio smoke
+        run: |
+          set +e
+          ./luac examples/https.lua > https-smoke.log 2>&1
+          https_status=$?
+          ./luac tests/audio.lua > audio-smoke.log 2>&1
+          audio_status=$?
+          ./tests/run_websocket.sh > websocket-smoke.log 2>&1
+          websocket_status=$?
+          set -e
+          cat https-smoke.log audio-smoke.log websocket-smoke.log
+          if [ "$https_status" -ne 0 ] || [ "$audio_status" -ne 0 ] || [ "$websocket_status" -ne 0 ]; then
+            message=$(grep -E -C 2 'error:|error generated|undefined|RuntimeError|Assertion|failed' https-smoke.log audio-smoke.log websocket-smoke.log | tail -c 6000 | tr '\r\n' '  ' || true)
+            printf '::error file=examples/https.lua::HTTPS %s, audio %s, WebSocket %s: %s\n' "$https_status" "$audio_status" "$websocket_status" "$message"
+            exit 1
+          fi
+      - name: Package
+        run: |
+          mkdir -p dist/linux
+          cp luac build/libluac.a build/libluac.so src/luac.h src/runtime.h src/luac_interpreter.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/engine.hpp README.md LICENSE dist/linux/
+          cp -r src/third_party examples dist/linux/
+          tar -C dist -czf dist/LuaC-linux-x86_64.tar.gz linux
+          git archive --format=tar.gz --prefix=LuaC-0.5.0/ -o dist/LuaC-source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-linux-x86_64
+          path: dist/LuaC-linux-x86_64.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-source
+          path: dist/LuaC-source.tar.gz
+
+  windows:
+    name: Windows EXE and libraries
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            make
+            p7zip
+            mingw-w64-ucrt-x86_64-mbedtls
+      - name: Build CLI
+        shell: msys2 {0}
+        env:
+          CC: gcc
+        run: |
+          set +e
+          make -j2 MBEDTLS=1 MINIAUDIO=1 all > build-cli.log 2>&1
+          status=$?
+          cat build-cli.log
+          if [ "$status" -ne 0 ]; then
+            message=$(tail -c 6000 build-cli.log | tr '\r\n' '  ')
+            printf '::error file=Makefile::%s\n' "$message"
+            exit "$status"
+          fi
+      - name: Build libraries
+        shell: msys2 {0}
+        env:
+          CC: gcc
+        run: make -j2 MBEDTLS=1 MINIAUDIO=1 libraries
+      - name: Smoke test
+        shell: msys2 {0}
+        env:
+          CC: gcc
+          LUAC_TRACE: 1
+        run: |
+          ./luac.exe --version
+          ./luac.exe examples/https.lua
+          ./luac.exe tests/audio.lua
+          ./luac.exe tests/runtime.lua
+          set +e
+          ./luac.exe examples/demo.lua > library-smoke.log 2>&1
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            ./luac.exe tests/libraries.lua >> library-smoke.log 2>&1
+            status=$?
+          fi
+          cat library-smoke.log
+          if [ "$status" -ne 0 ]; then
+            message=$(tail -c 1800 library-smoke.log | tr '\r\n' '  ')
+            printf '::error file=tests/libraries.lua::%s\n' "$message"
+            exit "$status"
+          fi
+      - name: Package
+        shell: msys2 {0}
+        run: |
+          mkdir -p dist/windows
+          cp luac.exe build/libluac.a build/libluac.dll src/luac.h src/runtime.h src/luac_interpreter.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/engine.hpp README.md LICENSE dist/windows/
+          cp -r src/third_party examples dist/windows/
+          cp /ucrt64/bin/libmbed*.dll dist/windows/
+          7z a -tzip dist/LuaC-windows-x86_64.zip ./dist/windows/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-windows-x86_64
+          path: dist/LuaC-windows-x86_64.zip
+
+  macos:
+    name: macOS CLI and libraries
+    runs-on: macos-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install mbedtls@3 pkg-config
+      - run: make -j2 MBEDTLS=1 MINIAUDIO=1 MBEDTLS_CFLAGS="-I$(brew --prefix mbedtls@3)/include" MBEDTLS_LDFLAGS="-L$(brew --prefix mbedtls@3)/lib -lmbedtls -lmbedx509 -lmbedcrypto" all
+      - run: make -j2 MBEDTLS=1 MINIAUDIO=1 MBEDTLS_CFLAGS="-I$(brew --prefix mbedtls@3)/include" MBEDTLS_LDFLAGS="-L$(brew --prefix mbedtls@3)/lib -lmbedtls -lmbedx509 -lmbedcrypto" libraries
+      - name: HTTPS and audio smoke
+        env:
+          LUAC_CFLAGS: -Wno-deprecated-declarations
+        run: |
+          set +e
+          ./luac examples/https.lua > https-smoke.log 2>&1
+          https_status=$?
+          ./luac tests/audio.lua > audio-smoke.log 2>&1
+          audio_status=$?
+          ./tests/run_websocket.sh > websocket-smoke.log 2>&1
+          websocket_status=$?
+          ./luac tests/runtime.lua > runtime-smoke.log 2>&1
+          runtime_status=$?
+          set -e
+          cat https-smoke.log audio-smoke.log websocket-smoke.log runtime-smoke.log
+          if [ "$https_status" -ne 0 ] || [ "$audio_status" -ne 0 ] || [ "$websocket_status" -ne 0 ] || [ "$runtime_status" -ne 0 ]; then
+            https_message=$(grep -E -C 2 'error:|error generated|undefined|RuntimeError|Assertion|failed' https-smoke.log | tail -c 4000 | tr '\r\n' '  ' || true)
+            audio_message=$(grep -E -C 2 'error:|error generated|undefined|RuntimeError|Assertion|failed' audio-smoke.log websocket-smoke.log runtime-smoke.log | tail -c 4000 | tr '\r\n' '  ' || true)
+            printf '::error file=examples/https.lua::HTTPS status %s: %s; audio status %s: %s\n' "$https_status" "$https_message" "$audio_status" "$audio_message"
+            exit 1
+          fi
+      - name: Package universal sources and native arm64 build
+        run: |
+          mkdir -p dist/macos
+          cp luac build/libluac.a build/libluac.dylib src/luac.h src/runtime.h src/luac_interpreter.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/engine.hpp README.md LICENSE dist/macos/
+          cp -r src/third_party examples dist/macos/
+          tar -C dist -czf dist/LuaC-macos-arm64.tar.gz macos
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-macos-arm64
+          path: dist/LuaC-macos-arm64.tar.gz
+
+  gui-linux:
+    name: Vulkan Studio Linux
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Vulkan and GLFW dependencies
+        run: sudo apt-get update && sudo apt-get install -y libglfw3-dev libvulkan-dev glslang-tools pkg-config
+      - run: make -j2 all gui
+      - name: Package
+        run: |
+          mkdir -p dist/studio-linux/build
+          cp luac build/luac-gui src/runtime.h src/luac_interpreter.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h README.md LICENSE dist/studio-linux/
+          cp gui/third_party/Nuklear-LICENSE gui/FONT-LICENSE.txt dist/studio-linux/
+          cp build/*.spv dist/studio-linux/build/
+          cp -r src/third_party examples dist/studio-linux/
+          tar -C dist -czf dist/LuaC-Studio-linux-x86_64.tar.gz studio-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-Studio-linux-x86_64
+          path: dist/LuaC-Studio-linux-x86_64.tar.gz
+
+  gui-windows:
+    name: Vulkan Studio Windows
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            make
+            p7zip
+            pkgconf
+            mingw-w64-ucrt-x86_64-glfw
+            mingw-w64-ucrt-x86_64-vulkan-headers
+            mingw-w64-ucrt-x86_64-vulkan-loader
+            mingw-w64-ucrt-x86_64-glslang
+      - name: Build Vulkan Studio
+        shell: msys2 {0}
+        env:
+          CC: gcc
+          CXX: g++
+        run: make -j2 all gui
+      - name: Package
+        shell: msys2 {0}
+        run: |
+          mkdir -p dist/studio-windows/build
+          cp luac.exe build/luac-gui.exe src/runtime.h src/luac_interpreter.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h README.md LICENSE dist/studio-windows/
+          cp gui/third_party/Nuklear-LICENSE gui/FONT-LICENSE.txt dist/studio-windows/
+          cp /ucrt64/bin/glfw3.dll dist/studio-windows/
+          if [ -f /ucrt64/bin/vulkan-1.dll ]; then cp /ucrt64/bin/vulkan-1.dll dist/studio-windows/; fi
+          cp build/*.spv dist/studio-windows/build/
+          cp -r src/third_party examples dist/studio-windows/
+          7z a -tzip dist/LuaC-Studio-windows-x86_64.zip ./dist/studio-windows/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-Studio-windows-x86_64
+          path: dist/LuaC-Studio-windows-x86_64.zip
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Install Android command-line tools
+        run: |
+          mkdir -p "$ANDROID_HOME/cmdline-tools" /tmp/android-cli
+          curl -fL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/android-cli/tools.zip
+          unzip -q /tmp/android-cli/tools.zip -d /tmp/android-cli
+          rm -rf "$ANDROID_HOME/cmdline-tools/latest"
+          mv /tmp/android-cli/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+      - name: Install Android NDK and CMake
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" --version
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" 'ndk;27.2.12479018' 'cmake;3.22.1' 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Check Android text contrast
+        run: python3 android/tests/test_theme.py
+      - name: Assemble APK
+        working-directory: android
+        shell: bash
+        run: |
+          if ! gradle --no-daemon testDebugUnitTest assembleDebug > android-build.log 2>&1; then
+            message=$(grep -E '(^|[ :])error:|undefined reference|undefined symbol|FAILURE:|^e:' android-build.log | tail -c 3000 | tr '\r\n' '  ' || true)
+            echo "::error file=android/app/build.gradle::${message}"
+            tail -100 android-build.log
+            exit 1
+          fi
+          tail -20 android-build.log
+      - name: Package APK
+        run: mkdir -p dist && cp android/app/build/outputs/apk/debug/app-debug.apk dist/LuaC-Studio-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuaC-Studio-Android-APK
+          path: dist/LuaC-Studio-debug.apk
+

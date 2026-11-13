@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_run"
+        app:showAsAction="ifRoom"
+        android:icon="@drawable/ic_play"
+        android:title="Run" />
+    <item
+        android:id="@+id/action_add_file"
+        app:showAsAction="ifRoom"
+        android:icon="@drawable/ic_add"
+        android:title="New file" />
+    <item
+        android:id="@+id/action_add_folder"
+        android:icon="@drawable/ic_folder"
+        android:title="New folder" />
+    <item
+        android:id="@+id/action_import"
+        android:icon="@drawable/ic_upload"
+        android:title="Import asset" />
+</menu>

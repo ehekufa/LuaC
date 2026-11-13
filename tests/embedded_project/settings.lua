@@ -1,0 +1,1 @@
+projectName = 'Embedded project OK'
