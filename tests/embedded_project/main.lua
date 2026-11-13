@@ -1,3 +1,9 @@
+local immutable <const> = 9
+assert(immutable == 9)
+local badConst, constError = load("local x <const> = 1; x = 2")
+assert(badConst == nil and type(constError) == "string")
+local constantReader = assert(load("local x <const> = 15; return function() return x end"))()
+assert(constantReader() == 15)
 -- Text chunk loading in the embedded project runtime.
 local chunk, err = load("return ...", "dynamic_chunk", "t")
 assert(chunk, err)

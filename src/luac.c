@@ -241,6 +241,7 @@ typedef enum { S_LOCAL,S_ASSIGN,S_EXPR,S_IF,S_WHILE,S_REPEAT,S_FORNUM,S_FORIN,S_
 struct Stmt {
     StmtKind kind; int line; Stmt *next;
     char **names; int nnames;
+    unsigned char *attributes; /* Per-local declaration: 1 means <const>. */
     Expr **exprs; int nexprs;
     Expr *expr,*expr2,*expr3;
     Stmt *body;
@@ -366,7 +367,18 @@ static Stmt *parse_statement(Parser *p) {
             Stmt *s=new_stmt(p,S_LOCALFUNC); s->line=line; name_list_add(&s->names,&s->nnames,expect_name(p)); s->expr=parse_function_body(p,line,0); return s;
         }
         { Stmt *s=new_stmt(p,S_LOCAL); s->line=line;
-          do { name_list_add(&s->names,&s->nnames,expect_name(p)); } while(accept_token(p,T_COMMA));
+          do {
+              int attribute = 0;
+              name_list_add(&s->names,&s->nnames,expect_name(p));
+              if (accept_token(p,T_LT)) {
+                  char *attr=expect_name(p);
+                  if (!strcmp(attr,"const")) attribute=1;
+                  else parse_error(p,"unsupported local attribute '%s'",attr);
+                  free(attr); expect(p,T_GT);
+              }
+              s->attributes=xrealloc(s->attributes,(size_t)s->nnames);
+              s->attributes[s->nnames-1]=(unsigned char)attribute;
+          } while(accept_token(p,T_COMMA));
           if(accept_token(p,T_ASSIGN)) parse_expr_list(p,&s->exprs,&s->nexprs);
           return s; }
     }
@@ -420,7 +432,88 @@ static Stmt *parse_block(Parser *p) {
 
 static void free_stmt(Stmt *s);
 static void free_expr(Expr *e){int i;if(!e)return;free_expr(e->a);free_expr(e->b);for(i=0;i<e->count;++i){free_expr(e->items[i]);if(e->keys)free_expr(e->keys[i]);}free(e->items);free(e->keys);for(i=0;i<e->nparams;++i)free(e->params[i]);free(e->params);free(e->name);free_stmt(e->body);free(e);}
-static void free_stmt(Stmt *s){int i;if(!s)return;free_stmt(s->next);free_stmt(s->body);for(i=0;i<s->nnames;++i)free(s->names[i]);free(s->names);for(i=0;i<s->nexprs;++i)free_expr(s->exprs[i]);free(s->exprs);free_expr(s->expr);free_expr(s->expr2);free_expr(s->expr3);for(i=0;i<s->nblocks;++i){free_expr(s->conds[i]);free_stmt(s->blocks[i]);}free(s->conds);free(s->blocks);free(s);}
+static void free_stmt(Stmt *s){int i;if(!s)return;free_stmt(s->next);free_stmt(s->body);for(i=0;i<s->nnames;++i)free(s->names[i]);free(s->names);free(s->attributes);for(i=0;i<s->nexprs;++i)free_expr(s->exprs[i]);free(s->exprs);free_expr(s->expr);free_expr(s->expr2);free_expr(s->expr3);for(i=0;i<s->nblocks;++i){free_expr(s->conds[i]);free_stmt(s->blocks[i]);}free(s->conds);free(s->blocks);free(s);}
+
+/* Validate const writes once for every backend, including --check and load.
+   Locals enter scope only after their initializer; function parameters, loop
+   variables, and inner declarations shadow captured names. */
+typedef struct VerifyLocal { const char *name; int is_const; struct VerifyLocal *next; } VerifyLocal;
+static void verify_stmts(Parser *p, Stmt *s, VerifyLocal **locals, int restore);
+static void verify_push(VerifyLocal **locals, const char *name, int is_const) {
+    VerifyLocal *local = xmalloc(sizeof(*local));
+    local->name = name; local->is_const = is_const; local->next = *locals; *locals = local;
+}
+static void verify_pop_to(VerifyLocal **locals, VerifyLocal *mark) {
+    while (*locals != mark) { VerifyLocal *local = *locals; *locals = local->next; free(local); }
+}
+static void verify_expr(Parser *p, Expr *e, VerifyLocal **locals) {
+    int i;
+    if (!e || p->failed) return;
+    if (e->kind == E_FUNCTION) {
+        VerifyLocal *mark = *locals;
+        for (i=0; i<e->nparams; ++i) verify_push(locals,e->params[i],0);
+        verify_stmts(p,e->body,locals,0);
+        verify_pop_to(locals,mark);
+        return;
+    }
+    verify_expr(p,e->a,locals); verify_expr(p,e->b,locals);
+    for (i=0; i<e->count; ++i) {
+        verify_expr(p,e->items[i],locals);
+        if (e->keys) verify_expr(p,e->keys[i],locals);
+    }
+}
+static void verify_target(Parser *p, Expr *target, VerifyLocal *locals, int line) {
+    VerifyLocal *local;
+    if (!target || target->kind != E_VAR) return;
+    for (local=locals; local; local=local->next) if (!strcmp(local->name,target->name)) {
+        if (local->is_const) {
+            int oldline=p->token.line; p->token.line=line;
+            parse_error(p,"attempt to assign to const variable '%s'",target->name);
+            p->token.line=oldline;
+        }
+        return;
+    }
+}
+static void verify_stmts(Parser *p, Stmt *s, VerifyLocal **locals, int restore) {
+    VerifyLocal *mark=*locals;
+    int i;
+    for (; s && !p->failed; s=s->next) {
+        if (s->kind == S_LOCALFUNC) {
+            verify_push(locals,s->names[0],0);
+            verify_expr(p,s->expr,locals);
+            continue;
+        }
+        if (s->kind == S_ASSIGN) {
+            if (s->flag == 0 && s->expr) verify_target(p,s->expr,*locals,s->line);
+            for (i=0; i<s->flag; ++i) verify_target(p,s->exprs[i],*locals,s->line);
+        }
+        if (s->kind != S_REPEAT) verify_expr(p,s->expr,locals);
+        verify_expr(p,s->expr2,locals); verify_expr(p,s->expr3,locals);
+        for (i=0; i<s->nexprs; ++i) verify_expr(p,s->exprs[i],locals);
+        if (s->kind == S_LOCAL) {
+            for (i=0; i<s->nnames; ++i) verify_push(locals,s->names[i],s->attributes && s->attributes[i]);
+        } else if (s->kind == S_REPEAT) {
+            VerifyLocal *loopmark=*locals;
+            verify_stmts(p,s->body,locals,0);
+            verify_expr(p,s->expr,locals);
+            verify_pop_to(locals,loopmark);
+        } else if (s->kind == S_FORNUM || s->kind == S_FORIN) {
+            VerifyLocal *loopmark=*locals;
+            for (i=0; i<s->nnames; ++i) verify_push(locals,s->names[i],0);
+            verify_stmts(p,s->body,locals,0);
+            verify_pop_to(locals,loopmark);
+        } else if (s->body) verify_stmts(p,s->body,locals,1);
+        for (i=0; i<s->nblocks; ++i) {
+            verify_expr(p,s->conds[i],locals);
+            verify_stmts(p,s->blocks[i],locals,1);
+        }
+    }
+    if (restore) verify_pop_to(locals,mark);
+}
+static void verify_program(Parser *p, Stmt *program) {
+    VerifyLocal *locals=NULL;
+    if (!p->failed) verify_stmts(p,program,&locals,1);
+}
 
 /* ---------------------------- C code generator -------------------------- */
 typedef enum { SYM_LOCAL,SYM_UPVALUE,SYM_GLOBAL } SymKind;
@@ -750,6 +843,7 @@ static void discover_expr_requires(ModuleBuild *build, Expr *e, const char *file
                 module->parser.length = source_length; module->parser.line = module->parser.column = 1;
                 next_token(&module->parser); module->program = parse_block(&module->parser);
                 if (module->parser.token.kind != T_EOF) parse_error(&module->parser, "unexpected token in module");
+                verify_program(&module->parser,module->program);
                 if (module->parser.failed) {
                     fprintf(stderr, "%s\n", module->parser.error); build->cg->failed = 1; return;
                 }
@@ -827,6 +921,7 @@ static void api_parse(Parser *p, const char *source, const char *filename, Stmt 
     next_token(p);
     *program = parse_block(p);
     if (p->token.kind != T_EOF) parse_error(p, "unexpected '%s'", token_name(p->token.kind));
+    verify_program(p, *program);
 }
 
 #ifdef LUAC_EMBEDDED_RUNTIME
@@ -939,7 +1034,7 @@ int main(int argc,char**argv){
     luac_executable_path = argc > 0 ? argv[0] : NULL;
     for(i=1;i<argc;++i){if(!strcmp(argv[i],"--check"))mode=MODE_CHECK;else if(!strcmp(argv[i],"--emit-c"))mode=MODE_C;else if(!strcmp(argv[i],"--aot"))mode=MODE_AOT;else if(!strcmp(argv[i],"--jit"))mode=MODE_JIT;else if(!strcmp(argv[i],"-o")&&i+1<argc)output=argv[++i];else if(!strcmp(argv[i],"--keep-c")&&i+1<argc)keep=argv[++i];else if(!strcmp(argv[i],"--cc")&&i+1<argc)cc=argv[++i];else if(!strcmp(argv[i],"--cflags")&&i+1<argc){sb_add(&extra_cflags," ");sb_add(&extra_cflags,argv[++i]);}else if(!strcmp(argv[i],"--ldflags")&&i+1<argc){sb_add(&extra_ldflags," ");sb_add(&extra_ldflags,argv[++i]);}else if(!strcmp(argv[i],"--version")){puts("LuaC "LUAC_VERSION);return 0;}else if(!strcmp(argv[i],"--help")||!strcmp(argv[i],"-h")){usage();return 0;}else if(argv[i][0]=='-'){fprintf(stderr,"luac: unknown option %s\n",argv[i]);return 2;}else if(!input)input=argv[i];else{fprintf(stderr,"luac: too many input files\n");return 2;}}
     if(!input){usage();return 2;}source=read_file(input,&length);if(!source)return 1;
-    memset(&p,0,sizeof(p));p.source=source;p.filename=input;p.length=length;p.line=1;p.column=1;next_token(&p);program=parse_block(&p);if(p.token.kind!=T_EOF)parse_error(&p,"unexpected '%s'",token_name(p.token.kind));
+    memset(&p,0,sizeof(p));p.source=source;p.filename=input;p.length=length;p.line=1;p.column=1;next_token(&p);program=parse_block(&p);if(p.token.kind!=T_EOF)parse_error(&p,"unexpected '%s'",token_name(p.token.kind));verify_program(&p,program);
     if(p.failed){fprintf(stderr,"%s\n",p.error);token_clear(&p.token);free_stmt(program);free(source);return 1;}
     if(mode==MODE_CHECK){printf("%s: syntax OK\n",input);token_clear(&p.token);free_stmt(program);free(source);return 0;}
     generated=generate_c(&p,program,input);

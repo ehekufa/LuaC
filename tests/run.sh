@@ -3,6 +3,19 @@ set -eu
 cd "$(dirname "$0")/.."
 mkdir -p tests/.tmp
 
+python3 tests/const_check.py
+./luac --check tests/const.lua >/dev/null
+if ./luac --check tests/const_invalid.lua >tests/.tmp/const-invalid.out 2>&1; then
+  echo 'assignment to a captured <const> was accepted' >&2; exit 1
+fi
+grep -q 'const variable' tests/.tmp/const-invalid.out
+./luac tests/const.lua > tests/.tmp/const-jit.out
+printf '%s\n' 'LuaC const: OK' > tests/.tmp/const-expected.out
+cmp tests/.tmp/const-expected.out tests/.tmp/const-jit.out
+./luac --aot tests/const.lua -o tests/.tmp/const-aot >/dev/null
+tests/.tmp/const-aot > tests/.tmp/const-aot.out
+cmp tests/.tmp/const-expected.out tests/.tmp/const-aot.out
+
 ./luac tests/warn.lua > tests/.tmp/warn-jit.out 2> tests/.tmp/warn-jit.err
 printf '%s\n' 'warn: OK' > tests/.tmp/warn-expected.out
 printf '%s\n' 'Lua warning: hello 42' 'Lua warning: @on ordinary' > tests/.tmp/warn-expected.err
