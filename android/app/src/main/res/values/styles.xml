@@ -1,9 +1,25 @@
 <resources>
-    <style name="Theme.LuaC" parent="android:style/Theme.Material.NoActionBar">
-        <item name="android:fontFamily">monospace</item>
-        <item name="android:colorAccent">#42DDB0</item>
+    <style name="Theme.LuaC" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#42DDB0</item>
+        <item name="colorOnPrimary">#00382A</item>
+        <item name="colorPrimaryContainer">#0E4A3A</item>
+        <item name="colorOnPrimaryContainer">#B9F5E2</item>
+        <item name="colorSecondary">#7FD8C0</item>
+        <item name="colorSecondaryContainer">#1E3A34</item>
+        <item name="colorOnSecondaryContainer">#C9F2E6</item>
+        <item name="colorTertiary">#8ECDF5</item>
+        <item name="colorBackground">#090D16</item>
+        <item name="colorOnBackground">#D7E3EC</item>
+        <item name="colorSurface">#0E1522</item>
+        <item name="colorOnSurface">#D7E3EC</item>
+        <item name="colorSurfaceVariant">#1A2436</item>
+        <item name="colorOnSurfaceVariant">#9FB2C3</item>
+        <item name="colorSurfaceContainer">#121B2B</item>
+        <item name="colorSurfaceContainerHigh">#1A2436</item>
+        <item name="colorError">#FFB4AB</item>
+        <item name="colorOutline">#3A4A5E</item>
         <item name="android:windowBackground">#090D16</item>
         <item name="android:navigationBarColor">#090D16</item>
-        <item name="android:statusBarColor">#101827</item>
+        <item name="android:statusBarColor">#090D16</item>
     </style>
 </resources>

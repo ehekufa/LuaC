@@ -1,36 +1,33 @@
 package com.luac.studio;
 
-import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.database.Cursor;
-import android.graphics.Color;
-import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
-import android.text.InputType;
-import android.view.Gravity;
+import android.view.LayoutInflater;
 import android.view.View;
-import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.EditText;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton;
+import com.google.android.material.textfield.TextInputEditText;
 import java.io.File;
 import java.io.InputStream;
 import org.json.JSONObject;
 
-public final class MainActivity extends Activity {
+public final class MainActivity extends AppCompatActivity {
     private static final int PICK_ASSET = 41;
-    private static final int BACKGROUND = Color.rgb(9, 13, 22);
-    private static final int PANEL = Color.rgb(14, 21, 34);
-    private static final int ACCENT = Color.rgb(66, 221, 176);
-    private static final int TEXT = Color.rgb(205, 220, 231);
 
     private static boolean nativeAvailable;
     private static String nativeLoadError = "";
@@ -52,11 +49,11 @@ public final class MainActivity extends Activity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private ProjectStore store;
-    private File project, directory, editorFile, importDirectory;
+    private File project, directory, editorFile, imageFile, importDirectory;
     private EditText editor;
     private TextView output;
     private RuntimeView runtimeView;
-    private boolean running, opening, runtimeError;
+    private boolean running, opening, runtimeError, destroyed;
     private long previousFrame;
     private final StringBuilder console = new StringBuilder();
 
@@ -80,98 +77,84 @@ public final class MainActivity extends Activity {
         showProjects();
     }
 
-    private LinearLayout screen() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(BACKGROUND);
-        root.setPadding(18, 12, 18, 12);
-        setContentView(root);
-        return root;
-    }
-    private TextView text(String value, int size, int color) {
-        TextView view = new TextView(this);
-        view.setText(value); view.setTextSize(size); view.setTextColor(color);
-        view.setPadding(4, 8, 4, 8);
-        return view;
-    }
-    private Button button(String label, View.OnClickListener listener) {
-        Button button = new Button(this);
-        button.setText(label); button.setOnClickListener(listener);
-        return button;
-    }
-    private LinearLayout row() {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        return row;
-    }
-    private void weighted(LinearLayout row, View view) { row.addView(view, new LinearLayout.LayoutParams(0, -2, 1)); }
     private void toast(Throwable error) { Toast.makeText(this, String.valueOf(error.getMessage() == null ? error : error.getMessage()), Toast.LENGTH_LONG).show(); }
     private void toast(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
 
+    private MaterialToolbar toolbar(int layout) {
+        setContentView(layout);
+        return findViewById(R.id.toolbar);
+    }
+    private void back(MaterialToolbar bar, Runnable action) {
+        bar.setNavigationIcon(R.drawable.ic_back);
+        bar.setNavigationOnClickListener(v -> action.run());
+    }
+    private String relative(File file) {
+        return project.toURI().relativize(file.toURI()).getPath();
+    }
+
     private void showProjects() {
         stopRuntime();
-        project = directory = editorFile = null;
-        LinearLayout root = screen();
+        project = directory = editorFile = imageFile = null;
+        MaterialToolbar bar = toolbar(R.layout.screen_projects);
         String version = "native unavailable";
         if (nativeAvailable) try { version = nativeVersion(); } catch (Throwable ignored) { }
-        root.addView(text("LuaC Studio", 28, ACCENT));
-        root.addView(text("Projects • " + version + " • in-process runtime", 14, TEXT));
-        LinearLayout actions = row();
-        weighted(actions, button("＋ NEW PROJECT", v -> newProjectDialog()));
-        weighted(actions, button("CREATE DEMO", v -> {
-            try { showProject(store.createProject("Demo")); } catch (Exception error) { toast(error); }
-        }));
-        root.addView(actions);
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
-        for (File item : store.projects()) {
-            list.addView(text(item.getName(), 21, Color.WHITE));
-            LinearLayout buttons = row();
-            weighted(buttons, button("FILES", v -> showProject(item)));
-            weighted(buttons, button("▶ RUN", v -> startProject(item)));
-            weighted(buttons, button("DELETE", v -> confirmDelete(item, this::showProjects)));
-            list.addView(buttons);
-        }
-        if (store.projects().isEmpty()) list.addView(text("Create a project to begin.", 16, TEXT));
-        scroll.addView(list); root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        root.addView(text("Each project has main.lua, Lua modules and an assets folder. No PC or C compiler is needed on the phone.", 13, TEXT));
+        bar.setTitle("LuaC Studio");
+        bar.setSubtitle(version + " • in-process runtime");
+        RecyclerView list = findViewById(R.id.list);
+        list.setLayoutManager(new LinearLayoutManager(this));
+        ProjectAdapter adapter = new ProjectAdapter(store, store.projects(), new ProjectAdapter.Listener() {
+            @Override public void onOpen(File item) { showProject(item); }
+            @Override public void onRun(File item) { startProject(item); }
+            @Override public void onRename(File item) {
+                renameDialog(item, renamed -> { showProjects(); toast("Renamed to " + renamed.getName()); });
+            }
+            @Override public void onDelete(File item) { confirmDelete(item, MainActivity.this::showProjects); }
+        });
+        list.setAdapter(adapter);
+        ExtendedFloatingActionButton fab = findViewById(R.id.fab);
+        fab.setOnClickListener(v -> newProjectDialog());
     }
 
     private void newProjectDialog() {
-        EditText name = new EditText(this); name.setHint("Project name"); name.setSingleLine();
-        new AlertDialog.Builder(this).setTitle("New project").setView(name)
-            .setPositiveButton("Create", (dialog, which) -> {
-                try { showProject(store.createProject(name.getText().toString())); }
-                catch (Exception error) { toast(error); }
-            }).setNegativeButton("Cancel", null).show();
+        nameDialog("New project", "", "Project name", "Create", name -> {
+            try { showProject(store.createProject(name)); }
+            catch (Exception error) { toast(error); }
+        });
     }
 
     private void showProject(File selected) { project = selected; showDirectory(selected); }
+
     private void showDirectory(File selected) {
-        stopRuntime(); directory = selected; editorFile = null;
-        LinearLayout root = screen();
-        root.addView(text(project.getName(), 23, ACCENT));
-        String relative = project.toURI().relativize(directory.toURI()).getPath();
-        root.addView(text(relative.isEmpty() ? "Project files" : relative, 14, TEXT));
-        LinearLayout actions = row();
-        weighted(actions, button("▶ RUN", v -> startProject(project)));
-        weighted(actions, button("＋FILE", v -> nameDialog("New Lua/text file", "script.lua", name -> {
-            try { showEditor(store.createFile(directory, name)); } catch (Exception error) { toast(error); }
-        })));
-        weighted(actions, button("＋FOLDER", v -> nameDialog("New folder", "scripts", name -> {
-            try { store.createFolder(directory, name); showDirectory(directory); } catch (Exception error) { toast(error); }
-        })));
-        weighted(actions, button("ASSET＋", v -> pickAsset()));
-        root.addView(actions);
-        if (!directory.equals(project)) root.addView(button("..  PARENT FOLDER", v -> showDirectory(directory.getParentFile())));
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
-        for (File item : store.children(directory)) {
-            String icon = item.isDirectory() ? "▸  " : isImage(item) ? "▧  " : "   ";
-            list.addView(button(icon + item.getName(), v -> openFile(item)));
-        }
-        scroll.addView(list); root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        root.addView(button("PROJECTS", v -> showProjects()));
+        stopRuntime();
+        directory = selected;
+        editorFile = imageFile = null;
+        MaterialToolbar bar = toolbar(R.layout.screen_files);
+        bar.setTitle(project.getName());
+        String path = relative(selected);
+        bar.setSubtitle(path.isEmpty() ? "Project files" : path);
+        back(bar, this::onBackPressed);
+        bar.inflateMenu(R.menu.menu_files);
+        bar.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == R.id.action_run) startProject(project);
+            else if (item.getItemId() == R.id.action_add_file) nameDialog("New file", "", "script.lua", "Create", name -> {
+                try { showEditor(store.createFile(directory, name)); } catch (Exception error) { toast(error); }
+            });
+            else if (item.getItemId() == R.id.action_add_folder) nameDialog("New folder", "", "scripts", "Create", name -> {
+                try { store.createFolder(directory, name); showDirectory(directory); } catch (Exception error) { toast(error); }
+            });
+            else if (item.getItemId() == R.id.action_import) pickAsset();
+            return true;
+        });
+        RecyclerView list = findViewById(R.id.list);
+        list.setLayoutManager(new LinearLayoutManager(this));
+        FileAdapter adapter = new FileAdapter(store.children(directory), new FileAdapter.Listener() {
+            @Override public void onOpen(File file) { openFile(file); }
+            @Override public void onRename(File file) {
+                renameDialog(file, renamed -> { showDirectory(directory); toast("Renamed to " + renamed.getName()); });
+            }
+            @Override public void onDelete(File file) { confirmDelete(file, () -> showDirectory(directory)); }
+        });
+        list.setAdapter(adapter);
     }
 
     private void openFile(File file) {
@@ -183,44 +166,63 @@ public final class MainActivity extends Activity {
         String name = file.getName().toLowerCase();
         return name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".webp");
     }
+
     private void showImage(File file) {
-        LinearLayout root = screen();
-        root.addView(text(file.getName(), 22, ACCENT));
-        ImageView image = new ImageView(this); image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        image.setImageURI(Uri.fromFile(file)); image.setBackgroundColor(PANEL);
-        root.addView(image, new LinearLayout.LayoutParams(-1, 0, 1));
-        root.addView(text("Project path: " + project.toURI().relativize(file.toURI()).getPath() + "\nUse it with engine.load_texture().", 15, TEXT));
-        LinearLayout actions = row();
-        weighted(actions, button("BACK", v -> showDirectory(file.getParentFile())));
-        weighted(actions, button("DELETE", v -> confirmDelete(file, () -> showDirectory(file.getParentFile()))));
-        root.addView(actions);
+        imageFile = file;
+        directory = file.getParentFile();
+        MaterialToolbar bar = toolbar(R.layout.screen_image);
+        bar.setTitle(file.getName());
+        bar.setSubtitle(relative(file));
+        back(bar, () -> showDirectory(file.getParentFile()));
+        bar.inflateMenu(R.menu.menu_image);
+        bar.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == R.id.action_rename) renameDialog(file, renamed -> showImage(renamed));
+            else if (item.getItemId() == R.id.action_delete) confirmDelete(file, () -> showDirectory(file.getParentFile()));
+            return true;
+        });
+        ImageView image = findViewById(R.id.image);
+        image.setImageURI(Uri.fromFile(file));
+        TextView path = findViewById(R.id.path);
+        path.setText("Use it with engine.load_texture('" + relative(file) + "').");
     }
 
     private void showEditor(File file) {
-        stopRuntime(); editorFile = file; directory = file.getParentFile();
-        LinearLayout root = screen();
-        root.addView(text(project.getName() + " / " + project.toURI().relativize(file.toURI()).getPath(), 17, ACCENT));
-        editor = new EditText(this);
-        try { editor.setText(store.read(file)); } catch (Exception error) { editor.setText(""); toast(error); }
-        editor.setTextColor(Color.rgb(220, 230, 241)); editor.setHintTextColor(Color.GRAY);
-        editor.setBackgroundColor(PANEL); editor.setPadding(18, 12, 18, 12);
-        editor.setGravity(Gravity.TOP); editor.setTypeface(Typeface.MONOSPACE); editor.setTextSize(14);
-        editor.setHorizontallyScrolling(true);
-        editor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        root.addView(editor, new LinearLayout.LayoutParams(-1, 0, 1));
-        LinearLayout actions = row();
-        weighted(actions, button("SAVE", v -> saveEditor()));
-        weighted(actions, button("▶ RUN", v -> { if (saveEditor()) startProject(project); }));
-        weighted(actions, button("CHECK", v -> { if (saveEditor()) output.setText(compilerCall(editor.getText().toString(), false)); }));
-        weighted(actions, button("C", v -> { if (saveEditor()) output.setText(compilerCall(editor.getText().toString(), true)); }));
-        root.addView(actions);
-        LinearLayout navigation = row();
-        weighted(navigation, button("FILES", v -> { if (saveEditor()) showDirectory(directory); }));
-        weighted(navigation, button("DELETE", v -> confirmDelete(file, () -> showDirectory(directory))));
-        root.addView(navigation);
-        ScrollView scroll = new ScrollView(this); output = text("Ready. RUN executes main.lua and all its require() modules.", 13, TEXT);
-        output.setTextIsSelectable(true); scroll.addView(output);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 150));
+        stopRuntime();
+        editorFile = file;
+        imageFile = null;
+        directory = file.getParentFile();
+        MaterialToolbar bar = toolbar(R.layout.screen_editor);
+        bar.setTitle(file.getName());
+        bar.setSubtitle(relative(file));
+        back(bar, () -> { if (saveEditor()) showDirectory(directory); });
+        bar.inflateMenu(R.menu.menu_editor);
+        bar.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == R.id.action_rename) renameEditorFile();
+            else if (item.getItemId() == R.id.action_check) { if (saveEditor()) output.setText(compilerCall(editor.getText().toString(), false)); }
+            else if (item.getItemId() == R.id.action_generate) { if (saveEditor()) output.setText(compilerCall(editor.getText().toString(), true)); }
+            else if (item.getItemId() == R.id.action_delete) confirmDelete(editorFile, () -> showDirectory(directory));
+            return true;
+        });
+        editor = findViewById(R.id.editor);
+        try { editor.setText(store.read(file)); } catch (Exception error) { toast(error); showDirectory(directory); return; }
+        MaterialButton save = findViewById(R.id.save);
+        save.setOnClickListener(v -> { if (saveEditor()) toast("Saved"); });
+        MaterialButton run = findViewById(R.id.run);
+        run.setOnClickListener(v -> { if (saveEditor()) startProject(project); });
+        output = findViewById(R.id.output);
+    }
+
+    private void renameEditorFile() {
+        if (!saveEditor()) return;
+        File current = editorFile;
+        renameDialog(current, renamed -> {
+            editorFile = renamed;
+            directory = renamed.getParentFile();
+            MaterialToolbar bar = findViewById(R.id.toolbar);
+            bar.setTitle(renamed.getName());
+            bar.setSubtitle(relative(renamed));
+            toast("Renamed to " + renamed.getName());
+        });
     }
 
     private boolean saveEditor() {
@@ -241,9 +243,9 @@ public final class MainActivity extends Activity {
         if (!new File(selected, "main.lua").isFile()) { toast("main.lua is missing"); return; }
         if (!nativeAvailable) { toast("Native library unavailable: " + nativeLoadError); return; }
         opening = true;
-        LinearLayout root = screen();
-        root.addView(text("Starting " + selected.getName() + "…", 24, ACCENT));
-        root.addView(text("Loading main.lua, modules and textures", 16, TEXT));
+        MaterialToolbar bar = toolbar(R.layout.screen_runtime);
+        bar.setTitle("Starting " + selected.getName() + "…");
+        bar.setSubtitle("Loading main.lua, modules and textures");
         new Thread(() -> {
             String result;
             try { result = nativeOpenProject(selected.getAbsolutePath()); }
@@ -251,9 +253,10 @@ public final class MainActivity extends Activity {
             final String completed = result;
             handler.post(() -> {
                 opening = false;
+                if (destroyed) { try { nativeCloseProject(); } catch (Throwable ignored) { } return; }
                 try { showRuntime(selected, new JSONObject(completed)); }
                 catch (Exception error) {
-                    new AlertDialog.Builder(this).setTitle("Project could not start").setMessage(completed)
+                    new MaterialAlertDialogBuilder(this).setTitle("Project could not start").setMessage(completed)
                         .setPositiveButton("OK", (dialog, which) -> showProject(selected)).show();
                 }
             });
@@ -261,20 +264,26 @@ public final class MainActivity extends Activity {
     }
 
     private void showRuntime(File selected, JSONObject initial) {
-        project = selected; console.setLength(0); runtimeError = false;
-        LinearLayout root = screen();
-        LinearLayout title = row();
-        weighted(title, text("▶ " + selected.getName(), 19, ACCENT));
-        title.addView(button("STOP / EDIT", v -> showProject(selected)));
-        root.addView(title);
+        project = selected;
+        console.setLength(0);
+        runtimeError = false;
+        MaterialToolbar bar = toolbar(R.layout.screen_runtime);
+        bar.setTitle(selected.getName());
+        bar.setSubtitle("Running • touch the scene");
+        bar.inflateMenu(R.menu.menu_runtime);
+        bar.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == R.id.action_stop) showProject(selected);
+            return true;
+        });
         runtimeView = new RuntimeView(this, selected, (id, x, y, down) -> {
             if (running) nativeTouchProject(id, x, y, down);
         });
-        root.addView(runtimeView, new LinearLayout.LayoutParams(-1, 0, 1));
-        ScrollView scroll = new ScrollView(this); output = text("", 13, TEXT); output.setTypeface(Typeface.MONOSPACE);
-        output.setTextIsSelectable(true); scroll.addView(output);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 180));
-        running = true; previousFrame = 0; applyFrame(initial);
+        FrameLayout game = findViewById(R.id.game);
+        game.addView(runtimeView, new FrameLayout.LayoutParams(-1, -1));
+        output = findViewById(R.id.output);
+        running = true;
+        previousFrame = 0;
+        applyFrame(initial);
         if (running) handler.post(frame);
     }
 
@@ -283,7 +292,8 @@ public final class MainActivity extends Activity {
         runtimeView.setFrame(value);
         appendConsole(value.optString("output"));
         if (!value.optBoolean("ok", false) && !runtimeError) {
-            runtimeError = true; running = false;
+            runtimeError = true;
+            running = false;
             appendConsole("\n" + value.optString("error", "Runtime stopped") + "\n");
         }
     }
@@ -297,7 +307,8 @@ public final class MainActivity extends Activity {
     private void stopRuntime() {
         handler.removeCallbacks(frame);
         boolean wasRunning = running;
-        running = false; previousFrame = 0;
+        running = false;
+        previousFrame = 0;
         if (nativeAvailable && (wasRunning || runtimeView != null)) {
             try { nativeCloseProject(); } catch (Throwable ignored) { }
         }
@@ -307,10 +318,11 @@ public final class MainActivity extends Activity {
 
     private void pickAsset() {
         importDirectory = directory;
-        String relative = project.toURI().relativize(directory.toURI()).getPath();
-        if (!relative.startsWith("assets/")) importDirectory = new File(project, "assets");
+        String path = relative(directory);
+        if (!path.startsWith("assets/")) importDirectory = new File(project, "assets");
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE); intent.setType("image/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
         startActivityForResult(intent, PICK_ASSET);
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
@@ -319,7 +331,8 @@ public final class MainActivity extends Activity {
         Uri uri = data.getData();
         try (InputStream input = getContentResolver().openInputStream(uri)) {
             File imported = store.importFile(importDirectory, displayName(uri), input);
-            toast("Imported " + imported.getName()); showDirectory(importDirectory);
+            toast("Imported " + imported.getName());
+            showDirectory(importDirectory);
         } catch (Exception error) { toast(error); }
     }
     private String displayName(Uri uri) {
@@ -332,15 +345,31 @@ public final class MainActivity extends Activity {
         return "asset.png";
     }
 
-    private void nameDialog(String title, String hint, NameAction action) {
-        EditText input = new EditText(this); input.setHint(hint); input.setSingleLine();
-        new AlertDialog.Builder(this).setTitle(title).setView(input)
-            .setPositiveButton("Create", (dialog, which) -> action.run(input.getText().toString()))
+    private void nameDialog(String title, String initial, String hint, String positive, NameAction action) {
+        View view = LayoutInflater.from(this).inflate(R.layout.dialog_name, null);
+        TextInputEditText input = view.findViewById(R.id.input);
+        input.setText(initial);
+        input.setHint(hint);
+        if (!initial.isEmpty()) { input.setSelection(initial.length()); }
+        new MaterialAlertDialogBuilder(this).setTitle(title).setView(view)
+            .setPositiveButton(positive, (dialog, which) -> action.run(input.getText().toString()))
             .setNegativeButton("Cancel", null).show();
     }
+    private void renameDialog(File file, RenameAction after) {
+        String title = file.getName().equals("main.lua") ? "Rename entry point (main.lua is required to run)" : "Rename (references are not updated)";
+        nameDialog(title, file.getName(), file.getName(), "Rename", name -> {
+            try {
+                File renamed = store.rename(file, name);
+                if (renamed.equals(file)) { toast("Name unchanged"); return; }
+                after.run(renamed);
+            } catch (Exception error) { toast(error); }
+        });
+    }
     private interface NameAction { void run(String name); }
+    private interface RenameAction { void run(File renamed); }
+
     private void confirmDelete(File file, Runnable after) {
-        new AlertDialog.Builder(this).setTitle("Delete " + file.getName() + "?")
+        new MaterialAlertDialogBuilder(this).setTitle("Delete " + file.getName() + "?")
             .setMessage(file.isDirectory() ? "The folder and everything inside it will be deleted." : "This cannot be undone.")
             .setPositiveButton("Delete", (dialog, which) -> {
                 try { store.delete(file); after.run(); } catch (Exception error) { toast(error); }
@@ -351,6 +380,7 @@ public final class MainActivity extends Activity {
         if (opening) return;
         if (running || runtimeView != null) { showProject(project); return; }
         if (editorFile != null) { if (saveEditor()) showDirectory(directory); return; }
+        if (imageFile != null) { showDirectory(imageFile.getParentFile()); return; }
         if (project != null) {
             if (directory != null && !directory.equals(project)) showDirectory(directory.getParentFile());
             else showProjects();
@@ -358,7 +388,12 @@ public final class MainActivity extends Activity {
         }
         super.onBackPressed();
     }
+    @Override protected void onPause() {
+        if (editorFile != null) saveEditor();
+        super.onPause();
+    }
     @Override protected void onDestroy() {
+        destroyed = true;
         stopRuntime();
         if (nativeAvailable) try { nativeVulkanDestroy(); } catch (Throwable ignored) { }
         super.onDestroy();

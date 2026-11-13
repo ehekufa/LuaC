@@ -22,10 +22,17 @@ final class ProjectStore {
         if (!root.exists()) root.mkdirs();
     }
 
+    // Allows filesystem operations to be tested without an Android Context.
+    ProjectStore(File root) {
+        this.context = null;
+        this.root = root;
+        if (!root.exists()) root.mkdirs();
+    }
+
     List<File> projects() {
         ArrayList<File> result = new ArrayList<>();
         File[] files = root.listFiles();
-        if (files != null) for (File file : files) if (file.isDirectory() && new File(file, "main.lua").isFile()) result.add(file);
+        if (files != null) for (File file : files) if (file.isDirectory()) result.add(file);
         result.sort((a, b) -> a.getName().compareToIgnoreCase(b.getName()));
         return result;
     }
@@ -115,8 +122,31 @@ final class ProjectStore {
         return folder;
     }
 
+    File rename(File file, String requested) throws IOException {
+        if (!file.exists() || file.equals(root) || !file.getCanonicalPath().startsWith(root.getCanonicalPath() + File.separator))
+            throw new IOException("File is outside the projects folder or does not exist");
+        if (requested == null || requested.trim().isEmpty()) throw new IOException("Name cannot be empty");
+        String name = requested.trim();
+        if (name.equals(file.getName())) return file;
+        File target = checkedChild(file.getParentFile(), name);
+        if (target.exists()) throw new IOException("A file or folder with this name already exists");
+        if (!file.renameTo(target)) throw new IOException("Cannot rename " + file.getName());
+        return target;
+    }
+
+    int fileCount(File directory) {
+        int count = 0;
+        File[] children = directory.listFiles();
+        if (children != null) for (File child : children) {
+            if (child.isDirectory()) count += fileCount(child);
+            else count++;
+        }
+        return count;
+    }
+
     File importFile(File directory, String requested, InputStream input) throws IOException {
         String name = safeName(requested, "asset.bin");
+        if (!directory.exists() && !directory.mkdirs()) throw new IOException("Cannot create assets folder");
         File destination = unique(directory, name);
         copy(input, destination);
         return destination;
