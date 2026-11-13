@@ -4,12 +4,16 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_margin="16dp"
-    app:hintEnabled="true">
+    app:hintEnabled="true"
+    app:hintTextColor="@android:color/white"
+    android:textColorHint="@android:color/white">
 
     <com.google.android.material.textfield.TextInputEditText
         android:id="@+id/input"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:textColor="@android:color/white"
+        android:textColorHint="@android:color/white"
         android:inputType="text"
         android:singleLine="true" />
 </com.google.android.material.textfield.TextInputLayout>

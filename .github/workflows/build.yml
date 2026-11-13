@@ -277,6 +277,8 @@ jobs:
           "$SDKMANAGER" --version
           yes | "$SDKMANAGER" --licenses >/dev/null
           "$SDKMANAGER" 'ndk;27.2.12479018' 'cmake;3.22.1' 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Check Android text contrast
+        run: python3 android/tests/test_theme.py
       - name: Assemble APK
         working-directory: android
         shell: bash

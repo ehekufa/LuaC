@@ -32,6 +32,7 @@ struct LiModule {
     char *source;
     Parser parser;
     Stmt *program;
+    Expr *chunk; /* Synthetic function owned by this parsed source. */
     LiModule *next;
 };
 typedef struct {
@@ -134,7 +135,7 @@ static LcValue li_call_function(LcContext *ctx, LcFunction *self, int argc, LcVa
     vararg_count = argc > function->definition->nparams ? argc - function->definition->nparams : 0;
     frame.session = session;
     frame.varargs = function->definition->flag
-        ? lc_tuple_new(ctx, vararg_count, argv + function->definition->nparams, 0) : lc_nil();
+        ? lc_tuple_new(ctx, vararg_count, vararg_count ? argv + function->definition->nparams : NULL, 0) : lc_nil();
     li_exec_statements(&frame, env, function->definition->body, &result);
     lc_release(ctx, frame.varargs);
     li_env_release(ctx, env);
@@ -396,14 +397,14 @@ static LiFlow li_exec_statements(LiFrame *frame, LiEnv *env, Stmt *stmt, LcValue
         flow = li_exec_statement(frame, scope, stmt, result);
     li_env_release(frame->session->ctx, scope); return flow;
 }
-static char *li_read_file(const char *path) {
+static char *li_read_file(const char *path, size_t *length) {
     FILE *file = fopen(path, "rb");
     char *source; long size;
     if (!file) return NULL;
     if (fseek(file, 0, SEEK_END) || (size = ftell(file)) < 0 || fseek(file, 0, SEEK_SET)) { fclose(file); return NULL; }
     source = (char *)xmalloc((size_t)size + 1);
     if (fread(source, 1, (size_t)size, file) != (size_t)size) { fclose(file); free(source); return NULL; }
-    fclose(file); source[size] = 0; return source;
+    fclose(file); source[size] = 0; if (length) *length = (size_t)size; return source;
 }
 /* Project search paths are relative to the project root. Reject absolute paths
    and lexical parent traversal (this is not a symlink security boundary). */
@@ -466,7 +467,7 @@ static LiModule *li_parse_module(LiSession *session, const char *name, int main_
     LiModule *module;
     char *path = li_module_path(session, name, main_file), *source;
     if (!path) { if (!session->ctx->error) lc_error(session->ctx, "module '%s' not found in project package.path", name); return NULL; }
-    source = li_read_file(path);
+    source = li_read_file(path, NULL);
     if (!source) { lc_error(session->ctx, "module '%s' not found at %s", main_file ? "main" : name, path); free(path); return NULL; }
     module = (LiModule *)calloc(1, sizeof(*module));
     if (!module) { free(source);free(path);lc_error(session->ctx,"out of memory");return NULL; }
@@ -475,6 +476,102 @@ static LiModule *li_parse_module(LiSession *session, const char *name, int main_
     module->next = session->modules; session->modules = module;
     if (module->parser.failed) lc_error(session->ctx, "%s", module->parser.error);
     return module;
+}
+/* Compile text into an interpreted, vararg chunk. Keep its AST in the session
+   until close: returned functions and nested closures can outlive the call. */
+static LcValue li_load_text(LiSession *session, const char *source, size_t length, const char *name) {
+    LcContext *ctx = session->ctx;
+    LiModule *module;
+    LiFrame frame;
+    if (memchr(source, '\0', length)) {
+        LcValue values[2] = {lc_nil(), lc_string(ctx, "binary chunks and embedded NUL bytes are not supported")};
+        return lc_tuple_new(ctx, 2, values, 1);
+    }
+    module = (LiModule *)calloc(1, sizeof(*module));
+    if (!module) { lc_error(ctx, "out of memory"); return lc_nil(); }
+    module->source = xstrndup(source, length);
+    module->name = xstrdup(name);
+    api_parse(&module->parser, module->source, module->name, &module->program);
+    if (module->parser.failed) {
+        LcValue values[2] = {lc_nil(), lc_string(ctx, module->parser.error)};
+        token_clear(&module->parser.token); free_stmt(module->program);
+        free(module->source); free(module->name); free(module);
+        return lc_tuple_new(ctx, 2, values, 1);
+    }
+    module->chunk = (Expr *)calloc(1, sizeof(Expr));
+    if (!module->chunk) {
+        token_clear(&module->parser.token); free_stmt(module->program);
+        free(module->source); free(module->name); free(module);
+        lc_error(ctx, "out of memory"); return lc_nil();
+    }
+    module->chunk->kind = E_FUNCTION; module->chunk->flag = 1;
+    module->chunk->body = module->program;
+    module->next = session->modules; session->modules = module;
+    frame.session = session; frame.varargs = lc_nil();
+    return li_closure(&frame, session->root, module->chunk);
+}
+static LcValue li_load_error(LcContext *ctx, const char *message) {
+    LcValue values[2] = {lc_nil(), lc_string(ctx, message)};
+    return lc_tuple_new(ctx, 2, values, 1);
+}
+static LcValue li_builtin_load(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    LiSession *session = li_current;
+    LcValue source, arg;
+    const char *name = "=(load)";
+    int mode_index = 2;
+    (void)self;
+    if (!argc || (source = lc_first_value(argv[0])).type != LC_STRING) {
+        lc_error(ctx, "load currently requires a source string"); return lc_nil();
+    }
+    if (argc > 1 && (arg = lc_first_value(argv[1])).type != LC_NIL) {
+        if (arg.type != LC_STRING) { lc_error(ctx, "load chunk name must be a string"); return lc_nil(); }
+        name = arg.as.string->data;
+    }
+    if (argc > mode_index && (arg = lc_first_value(argv[mode_index])).type != LC_NIL) {
+        if (arg.type != LC_STRING) { lc_error(ctx, "load mode must be a string"); return lc_nil(); }
+        if (!strchr(arg.as.string->data, 't')) return li_load_error(ctx, "text chunk rejected by mode");
+    }
+    if (argc > 3 && lc_first_value(argv[3]).type != LC_NIL) {
+        lc_error(ctx, "load with a custom environment is not supported"); return lc_nil();
+    }
+    return li_load_text(session, source.as.string->data, source.as.string->length, name);
+}
+static LcValue li_builtin_loadfile(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    LcValue file, mode, result;
+    char *source; size_t length;
+    (void)self;
+    if (!argc || (file = lc_first_value(argv[0])).type != LC_STRING) {
+        lc_error(ctx, "loadfile currently requires a filename"); return lc_nil();
+    }
+    if (argc > 1 && (mode = lc_first_value(argv[1])).type != LC_NIL) {
+        if (mode.type != LC_STRING) { lc_error(ctx, "loadfile mode must be a string"); return lc_nil(); }
+        if (!strchr(mode.as.string->data, 't')) return li_load_error(ctx, "text chunk rejected by mode");
+    }
+    if (argc > 2 && lc_first_value(argv[2]).type != LC_NIL) {
+        lc_error(ctx, "loadfile with a custom environment is not supported"); return lc_nil();
+    }
+    if (strlen(file.as.string->data) != file.as.string->length) return li_load_error(ctx, "filename contains NUL");
+    source = li_read_file(file.as.string->data, &length);
+    if (!source) {
+        char message[512]; snprintf(message, sizeof(message), "cannot open file '%s'", file.as.string->data);
+        return li_load_error(ctx, message);
+    }
+    result = li_load_text(li_current, source, length, file.as.string->data);
+    free(source); return result;
+}
+static LcValue li_builtin_dofile(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {
+    LcValue loaded = li_builtin_loadfile(ctx, self, argc ? 1 : 0, argv);
+    LcValue function = lc_first(loaded), result;
+    if (function.type != LC_FUNCTION) {
+        if (!ctx->error) {
+            LcValue message = lc_nth(loaded, 1);
+            lc_error(ctx, "%s", message.type == LC_STRING ? message.as.string->data : "cannot load file");
+            lc_release(ctx, message);
+        }
+        lc_release(ctx, function); lc_release(ctx, loaded); return lc_nil();
+    }
+    result = lc_call(ctx, function, 0, NULL);
+    lc_release(ctx, function); lc_release(ctx, loaded); return result;
 }
 static LcValue li_execute_module(LiSession *session, LiModule *module) {
     LiEnv *env = li_env_new(NULL);
@@ -662,6 +759,10 @@ LUAC_API void *luac_project_open(const char *root_path, char **error_message) {
     session->root = li_env_new(NULL); session->budget = 1000000; li_current = session;
     require = lc_function_new(session->ctx,li_require,0,NULL,"project require");
     li_set_global(session,"require",require);
+    li_set_global(session,"load",lc_function_new(session->ctx,li_builtin_load,0,NULL,"load"));
+    li_set_global(session,"loadstring",lc_function_new(session->ctx,li_builtin_load,0,NULL,"loadstring"));
+    li_set_global(session,"loadfile",lc_function_new(session->ctx,li_builtin_loadfile,0,NULL,"loadfile"));
+    li_set_global(session,"dofile",lc_function_new(session->ctx,li_builtin_dofile,0,NULL,"dofile"));
     { LcValue package = li_global(session, "package");
       lc_set_field(session->ctx, package, "path", lc_string(session->ctx, "./?.lua;./?/init.lua"));
       lc_release(session->ctx, package); }
@@ -692,7 +793,7 @@ LUAC_API void luac_project_close(void *handle) {
     li_current = session;
     for(function=session->functions;function;function=next_function){next_function=function->next;li_env_release(session->ctx,function->closure);free(function);}
     li_env_release(session->ctx,session->root);
-    for(module=session->modules;module;module=next_module){next_module=module->next;token_clear(&module->parser.token);free_stmt(module->program);free(module->source);free(module->name);free(module);}
+    for(module=session->modules;module;module=next_module){next_module=module->next;token_clear(&module->parser.token);free_stmt(module->program);free(module->chunk);free(module->source);free(module->name);free(module);}
     lc_context_destroy(session->ctx);
     if(session->previous_cwd)chdir(session->previous_cwd);
     free(session->previous_cwd);free(session->root_path);free(session);li_current=NULL;

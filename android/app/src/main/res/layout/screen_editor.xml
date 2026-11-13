@@ -36,6 +36,7 @@
             android:inputType="textMultiLine|textNoSuggestions"
             android:padding="16dp"
             android:textColor="?attr/colorOnSurface"
+            android:textColorHint="?attr/colorOnSurfaceVariant"
             android:textSize="14sp" />
     </com.google.android.material.card.MaterialCardView>
 

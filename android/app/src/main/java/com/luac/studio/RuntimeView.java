@@ -78,7 +78,7 @@ final class RuntimeView extends View {
         if (texts != null) for (int index = 0; index < texts.length(); ++index) {
             JSONObject text = texts.optJSONObject(index);
             if (text == null) continue;
-            paint.setColor(Color.rgb(220, 235, 240));
+            paint.setColor(Color.WHITE);
             paint.setTextSize((float) text.optDouble("size", 16));
             canvas.drawText(text.optString("text"), (float) text.optDouble("x"), (float) text.optDouble("y"), paint);
         }

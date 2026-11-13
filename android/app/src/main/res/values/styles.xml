@@ -1,25 +1,44 @@
 <resources>
     <style name="Theme.LuaC" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">#42DDB0</item>
-        <item name="colorOnPrimary">#00382A</item>
+        <item name="colorPrimary">#125C49</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
         <item name="colorPrimaryContainer">#0E4A3A</item>
-        <item name="colorOnPrimaryContainer">#B9F5E2</item>
-        <item name="colorSecondary">#7FD8C0</item>
+        <item name="colorOnPrimaryContainer">#FFFFFF</item>
+        <item name="colorSecondary">#125C49</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
         <item name="colorSecondaryContainer">#1E3A34</item>
-        <item name="colorOnSecondaryContainer">#C9F2E6</item>
-        <item name="colorTertiary">#8ECDF5</item>
+        <item name="colorOnSecondaryContainer">#FFFFFF</item>
+        <item name="colorTertiary">#286080</item>
+        <item name="colorOnTertiary">#FFFFFF</item>
+        <item name="colorTertiaryContainer">#25425A</item>
+        <item name="colorOnTertiaryContainer">#FFFFFF</item>
         <item name="android:colorBackground">#090D16</item>
-        <item name="colorOnBackground">#D7E3EC</item>
+        <item name="colorOnBackground">#FFFFFF</item>
         <item name="colorSurface">#0E1522</item>
-        <item name="colorOnSurface">#D7E3EC</item>
+        <item name="colorOnSurface">#FFFFFF</item>
         <item name="colorSurfaceVariant">#1A2436</item>
-        <item name="colorOnSurfaceVariant">#9FB2C3</item>
+        <item name="colorOnSurfaceVariant">#FFFFFF</item>
         <item name="colorSurfaceContainer">#121B2B</item>
         <item name="colorSurfaceContainerHigh">#1A2436</item>
-        <item name="colorError">#FFB4AB</item>
+        <item name="colorError">#B3261E</item>
+        <item name="colorOnError">#FFFFFF</item>
+        <item name="colorErrorContainer">#692822</item>
+        <item name="colorOnErrorContainer">#FFFFFF</item>
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.LuaC.DialogButton</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Widget.LuaC.DialogButton</item>
+        <item name="buttonBarNeutralButtonStyle">@style/Widget.LuaC.DialogButton</item>
+        <item name="android:colorAccent">#FFFFFF</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#FFFFFF</item>
+        <item name="android:textColorHint">#FFFFFF</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
         <item name="colorOutline">#3A4A5E</item>
         <item name="android:windowBackground">#090D16</item>
         <item name="android:navigationBarColor">#090D16</item>
         <item name="android:statusBarColor">#090D16</item>
+    </style>
+    <style name="Widget.LuaC.DialogButton" parent="Widget.Material3.Button.TextButton">
+        <item name="android:textColor">#FFFFFF</item>
     </style>
 </resources>

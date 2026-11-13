@@ -2,6 +2,7 @@ package com.luac.studio;
 
 import android.content.Intent;
 import android.database.Cursor;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -15,6 +16,7 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatDelegate;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import com.google.android.material.appbar.MaterialToolbar;
@@ -70,6 +72,7 @@ public final class MainActivity extends AppCompatActivity {
     };
 
     @Override public void onCreate(Bundle state) {
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
         super.onCreate(state);
         store = new ProjectStore(this);
         try { if (store.projects().isEmpty()) store.createProject("Demo"); }
@@ -82,7 +85,10 @@ public final class MainActivity extends AppCompatActivity {
 
     private MaterialToolbar toolbar(int layout) {
         setContentView(layout);
-        return findViewById(R.id.toolbar);
+        MaterialToolbar bar = findViewById(R.id.toolbar);
+        bar.setTitleTextColor(Color.WHITE);
+        bar.setSubtitleTextColor(Color.WHITE);
+        return bar;
     }
     private void back(MaterialToolbar bar, Runnable action) {
         bar.setNavigationIcon(R.drawable.ic_back);

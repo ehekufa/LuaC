@@ -1,3 +1,26 @@
+-- Text chunk loading in the embedded project runtime.
+local chunk, err = load("return ...", "dynamic_chunk", "t")
+assert(chunk, err)
+local a, b = chunk(12, 34)
+assert(a == 12 and b == 34)
+local nested = assert(loadstring("return function() return 23 end"))()
+assert(nested() == 23)
+dynamicUpdate = nested
+local failing = assert(load("error('dynamic failure')"))
+assert(not pcall(failing))
+assert(load("return @") == nil)
+local bad, syntax = load("local =", "bad_chunk")
+assert(bad == nil and type(syntax) == "string")
+assert(load("return 1", nil, "b") == nil)
+assert(load("return 1" .. string.char(0) .. "garbage") == nil)
+local missing, why = loadfile("custom/missing.lua")
+assert(missing == nil and type(why) == "string")
+assert(not pcall(dofile, "custom/missing.lua"))
+local filechunk = assert(loadfile("custom/loadfile.lua"))
+assert(filechunk() == 91)
+assert(dofile("custom/loadfile.lua") == 91)
+assert(not pcall(load, "return 1", nil, "t", {}))
+print("Dynamic text chunks OK")
 -- Dynamic names and user preloads are supported by the embedded runner.
 package.preload['virtual'] = function(name) return { name = name } end
 package.path = 'absent/?.lua;custom/?.lua;./?.lua;./?/init.lua'
@@ -21,6 +44,7 @@ assert(texture, textureError)
 hero = player.create(world, texture)
 engine.text(world, projectName, 10, 20, 18)
 function update(dt)
+  assert(dynamicUpdate() == 23)
   player.update(hero, dt)
 end
 print('Project started:', projectName)

@@ -17,6 +17,7 @@ int main(void) {
     }
     json = luac_project_step(project, 0);
     ok &= expect("main and nested disk require execute", json && strstr(json, "Embedded project OK"), json);
+    ok &= expect("dynamic text chunks execute", json && strstr(json, "Dynamic text chunks OK"), json);
     ok &= expect("warnings are captured", json && strstr(json, "Lua warning: Embedded warning"), json);
     ok &= expect("print output is captured", json && strstr(json, "Project started:"), json);
     ok &= expect("PNG sprite is decoded", json && strstr(json, "assets/luac_logo.png"), json);
