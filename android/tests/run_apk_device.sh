@@ -32,7 +32,10 @@ wait_for_output() {
 if [ "${LUAC_DEVICE_PREBUILT:-0}" != 1 ]; then
   gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
 fi
-# Optional precompiled native project: no interpreter is linked into it.
+# Prebuilt CI runs must exercise the native project; local runs may omit it.
+if [ "${LUAC_DEVICE_PREBUILT:-0}" = 1 ]; then
+  test -f app/build/outputs/apk/aot/compiled-project
+fi
 if [ -f app/build/outputs/apk/aot/compiled-project ]; then
   adb push app/build/outputs/apk/aot/compiled-project /data/local/tmp/luac-compiled-project
   adb shell chmod 755 /data/local/tmp/luac-compiled-project
