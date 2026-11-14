@@ -30,6 +30,28 @@ public class ProjectStoreTest {
         assertTrue(store.projects().contains(project));
     }
 
+    @Test public void paintingSavesInAssetsAndNeverOverwrites() throws Exception {
+        File root = temporary.newFolder("projects");
+        ProjectStore store = new ProjectStore(root);
+        File project = new File(root, "game");
+        assertTrue(project.mkdir());
+        byte[] png = {(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+        File saved = store.savePainting(project, "sprite", output -> output.write(png));
+        assertEquals(new File(project, "assets/sprite.png"), saved);
+        assertArrayEquals(png, Files.readAllBytes(saved.toPath()));
+        try { store.savePainting(project, "sprite.png", output -> output.write(0)); fail("overwrite"); }
+        catch (IOException expected) { assertArrayEquals(png, Files.readAllBytes(saved.toPath())); }
+        for (String name : new String[] {"", "../bad", "x/y", "x\\y", ".."}) {
+            try { store.savePainting(project, name, output -> {}); fail("unsafe: " + name); }
+            catch (IOException expected) { }
+        }
+        try { store.savePainting(project, "incomplete", output -> { output.write(1); throw new IOException("disk error"); }); fail("failure"); }
+        catch (IOException expected) { assertFalse(new File(project, "assets/incomplete.png").exists()); }
+        File outside = temporary.newFolder("outside");
+        try { store.savePainting(outside, "bad", output -> {}); fail("outside"); }
+        catch (IOException expected) { }
+    }
+
     @Test public void refusesCollisionsInvalidNamesAndOutsideFiles() throws Exception {
         File root = temporary.newFolder("projects");
         ProjectStore store = new ProjectStore(root);

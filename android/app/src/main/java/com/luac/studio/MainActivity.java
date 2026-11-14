@@ -13,6 +13,7 @@ import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
@@ -29,6 +30,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.FileOutputStream;
 import org.json.JSONObject;
 
 public final class MainActivity extends AppCompatActivity {
@@ -60,6 +62,7 @@ public final class MainActivity extends AppCompatActivity {
     private EditText editor;
     private TextView output;
     private RuntimeView runtimeView;
+    private PaintView paintView;
     private boolean running, opening, runtimeError, destroyed;
     private long previousFrame;
     private final StringBuilder console = new StringBuilder();
@@ -86,11 +89,39 @@ public final class MainActivity extends AppCompatActivity {
         if (state != null) {
             String pending = state.getString("exportProject");
             if (pending != null) exportProject = new File(pending);
+            String paintProject = state.getString("paintProject"), draft = state.getString("paintDraft");
+            if (paintProject != null && draft != null) {
+                File saved = new File(draft);
+                try {
+                    File restoredProject = new File(paintProject);
+                    if (!restoredProject.isDirectory() || !restoredProject.getParentFile().getCanonicalFile().equals(store.root.getCanonicalFile()) ||
+                        !saved.getParentFile().getCanonicalFile().equals(getCacheDir().getCanonicalFile()))
+                        throw new IOException("Cannot restore drawing");
+                    project = restoredProject;
+                    directory = restoredProject;
+                    showPaint();
+                    paintView.restore(saved.getAbsolutePath(), state.getBoolean("paintDirty"));
+                } catch (Exception error) { toast(error); }
+                finally { if (saved.getParentFile().equals(getCacheDir())) saved.delete(); }
+            }
         }
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
         if (exportProject != null) state.putString("exportProject", exportProject.getAbsolutePath());
+        if (paintView != null && project != null) {
+            File draft = null;
+            try {
+                draft = File.createTempFile("paint-", ".png", getCacheDir());
+                try (OutputStream out = new FileOutputStream(draft)) { paintView.writePng(out); }
+                state.putString("paintProject", project.getAbsolutePath());
+                state.putString("paintDraft", draft.getAbsolutePath());
+                state.putBoolean("paintDirty", paintView.isDirty());
+            } catch (IOException error) {
+                if (draft != null) draft.delete();
+                toast("Could not preserve the drawing: " + error.getMessage());
+            }
+        }
         super.onSaveInstanceState(state);
     }
 
@@ -114,6 +145,7 @@ public final class MainActivity extends AppCompatActivity {
 
     private void showProjects() {
         stopRuntime();
+        paintView = null;
         project = directory = editorFile = imageFile = null;
         MaterialToolbar bar = toolbar(R.layout.screen_projects);
         String version = "native unavailable";
@@ -152,6 +184,7 @@ public final class MainActivity extends AppCompatActivity {
 
     private void showDirectory(File selected) {
         stopRuntime();
+        paintView = null;
         directory = selected;
         editorFile = imageFile = null;
         MaterialToolbar bar = toolbar(R.layout.screen_files);
@@ -169,6 +202,7 @@ public final class MainActivity extends AppCompatActivity {
                 try { store.createFolder(directory, name); showDirectory(directory); } catch (Exception error) { toast(error); }
             });
             else if (item.getItemId() == R.id.action_import) pickAsset();
+            else if (item.getItemId() == R.id.action_paint) showPaint();
             else if (item.getItemId() == R.id.action_export_project) exportProject(project);
             return true;
         });
@@ -182,6 +216,56 @@ public final class MainActivity extends AppCompatActivity {
             @Override public void onDelete(File file) { confirmDelete(file, () -> showDirectory(directory)); }
         });
         list.setAdapter(adapter);
+    }
+
+    private void showPaint() {
+        stopRuntime();
+        editorFile = imageFile = null;
+        MaterialToolbar bar = toolbar(R.layout.screen_paint);
+        bar.setTitle("Paint");
+        bar.setSubtitle("512 × 512 • transparent PNG");
+        back(bar, this::leavePaint);
+        paintView = new PaintView(this);
+        FrameLayout canvas = findViewById(R.id.paint_canvas);
+        canvas.addView(paintView, new FrameLayout.LayoutParams(-1, -1));
+        int[] colors = {Color.BLACK, Color.WHITE, 0xffe53935, 0xffff9800, 0xffffeb3b,
+            0xff43a047, 0xff1e88e5, 0xff8e24aa, 0xff795548};
+        String[] names = {"Black", "White", "Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Brown"};
+        findViewById(R.id.paint_color).setOnClickListener(v ->
+            new MaterialAlertDialogBuilder(this).setTitle("Brush color")
+                .setItems(names, (dialog, which) -> { paintView.setBrushColor(colors[which]); toast(names[which] + " brush"); }).show());
+        findViewById(R.id.paint_eraser).setOnClickListener(v -> { paintView.setEraser(); toast("Eraser"); });
+        findViewById(R.id.paint_undo).setOnClickListener(v -> paintView.undo());
+        findViewById(R.id.paint_clear).setOnClickListener(v ->
+            new MaterialAlertDialogBuilder(this).setTitle("Clear the drawing?")
+                .setPositiveButton("Clear", (dialog, which) -> paintView.clear())
+                .setNegativeButton("Cancel", null).show());
+        findViewById(R.id.paint_save).setOnClickListener(v -> savePainting());
+        SeekBar size = findViewById(R.id.paint_size);
+        size.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seek, int progress, boolean fromUser) { paintView.setBrushSize(progress + 1); }
+            @Override public void onStartTrackingTouch(SeekBar seek) { }
+            @Override public void onStopTrackingTouch(SeekBar seek) { }
+        });
+    }
+
+    private void savePainting() {
+        nameDialog("Save image to assets", "drawing.png", "drawing.png", "Save", name -> {
+            try {
+                File saved = store.savePainting(project, name, output -> paintView.writePng(output));
+                paintView.markSaved();
+                toast("Saved " + relative(saved));
+            } catch (Exception error) { toast(error); }
+        });
+    }
+
+    private void leavePaint() {
+        if (paintView != null && paintView.isDirty()) {
+            new MaterialAlertDialogBuilder(this).setTitle("Discard unsaved drawing?")
+                .setMessage("Save the image to assets before leaving, or discard your changes.")
+                .setPositiveButton("Discard", (dialog, which) -> showDirectory(directory))
+                .setNegativeButton("Keep drawing", null).show();
+        } else showDirectory(directory);
     }
 
     private void openFile(File file) {
@@ -462,6 +546,7 @@ public final class MainActivity extends AppCompatActivity {
 
     @Override public void onBackPressed() {
         if (opening) return;
+        if (paintView != null) { leavePaint(); return; }
         if (running || runtimeView != null) { showProject(project); return; }
         if (editorFile != null) { if (saveEditor()) showDirectory(directory); return; }
         if (imageFile != null) { showDirectory(imageFile.getParentFile()); return; }

@@ -179,6 +179,29 @@ final class ProjectStore {
         }
     }
 
+    interface PngWriter { void write(OutputStream output) throws IOException; }
+
+    File savePainting(File project, String requested, PngWriter writer) throws IOException {
+        if (project == null || project.getParentFile() == null ||
+            !project.getParentFile().getCanonicalFile().equals(root.getCanonicalFile()) || !project.isDirectory())
+            throw new IOException("Project is outside the projects folder");
+        String name = requested == null ? "" : requested.trim();
+        if (name.isEmpty() || name.contains("/") || name.contains("\\") || name.equals(".") || name.equals(".."))
+            throw new IOException("Enter a valid image name");
+        if (!name.toLowerCase(java.util.Locale.ROOT).endsWith(".png")) name += ".png";
+        File assets = resolve(project, "assets");
+        if (!assets.isDirectory() && !assets.mkdirs()) throw new IOException("Cannot create assets folder");
+        File destination = checkedChild(assets, name);
+        if (!destination.createNewFile()) throw new IOException("Image already exists; choose another name");
+        try (OutputStream output = new FileOutputStream(destination)) {
+            writer.write(output);
+        } catch (IOException | RuntimeException error) {
+            if (!destination.delete()) error.addSuppressed(new IOException("Cannot remove incomplete image"));
+            throw error;
+        }
+        return destination;
+    }
+
     File importFile(File directory, String requested, InputStream input) throws IOException {
         String name = safeName(requested, "asset.bin");
         if (!directory.exists() && !directory.mkdirs()) throw new IOException("Cannot create assets folder");
