@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
     <application android:label="LuaC Project" android:theme="@android:style/Theme.Material.NoActionBar"
         android:allowBackup="false" android:extractNativeLibs="true">
         <activity android:name="com.luac.studio.MainActivity" android:exported="true">

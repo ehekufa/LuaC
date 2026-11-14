@@ -305,6 +305,22 @@ jobs:
           target: default
           disable-animations: true
           script: cd android && bash tests/run_apk_device.sh
+      - name: Check minimum Android version
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 26
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: cd android && bash tests/run_apk_device.sh
+      - name: Check current Android version
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: cd android && bash tests/run_apk_device.sh
       - name: Package APK
         run: mkdir -p dist && cp android/app/build/outputs/apk/debug/app-debug.apk dist/LuaC-Studio-debug.apk
       - uses: actions/upload-artifact@v4
