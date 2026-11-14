@@ -18,7 +18,7 @@ report_failure() {
 trap 'report_failure "$LINENO"' ERR
 printf 'original' > "$work/source.lua"
 printf '%s' 'Привет, Україна, Беларусь, қазақша — café' > "$work/expected"
-./build/luac-gui "$work/source.lua" > "$work/studio.log" 2>&1 &
+LUAC_UI_TRACE=1 ./build/luac-gui "$work/source.lua" > "$work/studio.log" 2>&1 &
 pid=$!
 window=$(timeout 20s xdotool search --sync --onlyvisible --name 'LuaC Studio' | head -1)
 xdotool windowfocus --sync "$window"
