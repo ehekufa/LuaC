@@ -237,7 +237,7 @@ jobs:
           "$scratch/install/luac.exe" "$scratch/install/examples/audio.lua"
           "$scratch/install/luac.exe" "$scratch/install/examples/demo.lua"
           "$scratch/install/luac.exe" --emit-c example.lua -o generated.c
-          "$scratch/install/tcc/tcc.exe" generated.c -o "$scratch/install/generated.exe" -lm -lws2_32
+          "$scratch/install/tcc/tcc.exe" generated.c -o "$scratch/install/generated.exe" -lws2_32
           "$scratch/install/generated.exe" | grep -F 1234567
       - uses: actions/upload-artifact@v4
         with:

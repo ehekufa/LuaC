@@ -1113,10 +1113,15 @@ int main(int argc,char**argv){
      char tmp[]="/tmp/luac-XXXXXX";
 #endif
      char*cfile,*sofile=NULL,*qcc,*qc,*qso,*qout;Str cmd;int cr;
+#ifdef _WIN32
+     const char *math_lib = ""; /* The Windows CRT already provides libm. */
+#else
+     const char *math_lib = "-lm";
+#endif
      if(keep)cfile=xstrdup(keep);else{if(!mkdtemp(tmp)){fprintf(stderr,"luac: mkdtemp: %s\n",strerror(errno));goto done;}cfile=xmalloc(strlen(tmp)+8);sprintf(cfile,"%s/main.c",tmp);}
      if(!write_file(cfile,generated,strlen(generated))){fprintf(stderr,"luac: cannot write %s\n",cfile);free(cfile);goto done;}
      qcc=shell_quote(cc);qc=shell_quote(cfile);sb_init(&cmd);
-     if(mode==MODE_AOT){if(!output){fprintf(stderr,"luac: --aot requires -o OUTPUT\n");free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}qout=shell_quote(output);sb_printf(&cmd,"%s -std=gnu99 -O2 -DLUAC_STANDALONE %s %s -o %s -lm %s",qcc,extra_cflags.data?extra_cflags.data:"",qc,qout,extra_ldflags.data?extra_ldflags.data:"");
+     if(mode==MODE_AOT){if(!output){fprintf(stderr,"luac: --aot requires -o OUTPUT\n");free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}qout=shell_quote(output);sb_printf(&cmd,"%s -std=gnu99 -O2 -DLUAC_STANDALONE %s %s -o %s %s %s",qcc,extra_cflags.data?extra_cflags.data:"",qc,qout,math_lib,extra_ldflags.data?extra_ldflags.data:"");
 #ifdef _WIN32
      sb_add(&cmd," -lws2_32");
 #endif
@@ -1127,7 +1132,7 @@ int main(int argc,char**argv){
 #else
       sprintf(sofile,"%s.so",cfile);
 #endif
-      qso=shell_quote(sofile);sb_printf(&cmd,"%s -std=gnu99 -O2 -fPIC -shared %s %s -o %s -lm %s",qcc,extra_cflags.data?extra_cflags.data:"",qc,qso,extra_ldflags.data?extra_ldflags.data:"");
+      qso=shell_quote(sofile);sb_printf(&cmd,"%s -std=gnu99 -O2 -fPIC -shared %s %s -o %s %s %s",qcc,extra_cflags.data?extra_cflags.data:"",qc,qso,math_lib,extra_ldflags.data?extra_ldflags.data:"");
 #ifdef _WIN32
       sb_add(&cmd," -lws2_32");
 #endif
@@ -1150,7 +1155,7 @@ int main(int argc,char**argv){
         else { args[n++]="-fPIC"; args[n++]="-shared"; }
         if(cresponse_arg) args[n++]=cresponse_arg;
         args[n++]=cfile; args[n++]="-o"; args[n++]=mode==MODE_AOT?output:sofile;
-        args[n++]="-lm"; args[n++]="-lws2_32";
+        args[n++]="-lws2_32";
         if(lresponse_arg) args[n++]=lresponse_arg;
         args[n]=NULL;
         cr=windows_spawn_compiler(cc,args);
