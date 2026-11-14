@@ -154,7 +154,10 @@ final class ProjectStore {
     }
 
     File importProject(InputStream input) throws IOException {
-        ProjectArchive.Document document = ProjectArchive.read(input);
+        return installDocument(ProjectArchive.read(input));
+    }
+
+    File installDocument(ProjectArchive.Document document) throws IOException {
         // Build outside the project list; an incomplete import must never appear as a project.
         File project = Files.createTempDirectory(root.getParentFile().toPath(), ".luac-import-").toFile();
         try {

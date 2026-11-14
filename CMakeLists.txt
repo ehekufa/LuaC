@@ -150,6 +150,15 @@ if(BUILD_TESTING)
     target_include_directories(luac-embedded-test PRIVATE src)
     target_link_libraries(luac-embedded-test PRIVATE luac_runtime)
     add_test(NAME luac-embedded-project COMMAND luac-embedded-test)
+    add_executable(luac-android-samples-test tests/android_samples_test.c src/luac.c)
+    target_compile_definitions(luac-android-samples-test PRIVATE
+        LUAC_LIBRARY_ONLY LUAC_EMBEDDED_RUNTIME LUAC_RUNTIME_PATH="runtime.h"
+        LUAC_SAMPLE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/android/app/src/main/assets/samples"
+    )
+    target_include_directories(luac-android-samples-test PRIVATE src)
+    target_link_libraries(luac-android-samples-test PRIVATE luac_runtime)
+    add_test(NAME luac-android-samples COMMAND luac-android-samples-test)
+
 
     if(LUAC_BUILD_CLI)
         add_test(NAME luac-pack-jit COMMAND luac_compiler

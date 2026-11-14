@@ -45,7 +45,7 @@ final class PaintView extends View {
         brush.setColor(color);
         brush.setXfermode(eraser ? new PorterDuffXfermode(PorterDuff.Mode.CLEAR) : null);
     }
-    boolean isDirty() { return dirty; }
+    boolean hasUnsavedChanges() { return dirty; }
     void markSaved() { dirty = false; }
     void clear() { snapshot(); image.eraseColor(Color.TRANSPARENT); dirty = true; invalidate(); }
     void undo() {

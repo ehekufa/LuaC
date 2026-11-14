@@ -13,6 +13,7 @@ import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -63,7 +64,7 @@ public final class MainActivity extends AppCompatActivity {
     private TextView output;
     private RuntimeView runtimeView;
     private PaintView paintView;
-    private boolean running, opening, runtimeError, destroyed;
+    private boolean running, opening, runtimeError, destroyed, showingSamples;
     private long previousFrame;
     private final StringBuilder console = new StringBuilder();
 
@@ -116,7 +117,7 @@ public final class MainActivity extends AppCompatActivity {
                 try (OutputStream out = new FileOutputStream(draft)) { paintView.writePng(out); }
                 state.putString("paintProject", project.getAbsolutePath());
                 state.putString("paintDraft", draft.getAbsolutePath());
-                state.putBoolean("paintDirty", paintView.isDirty());
+                state.putBoolean("paintDirty", paintView.hasUnsavedChanges());
             } catch (IOException error) {
                 if (draft != null) draft.delete();
                 toast("Could not preserve the drawing: " + error.getMessage());
@@ -145,6 +146,7 @@ public final class MainActivity extends AppCompatActivity {
 
     private void showProjects() {
         stopRuntime();
+        showingSamples = false;
         paintView = null;
         project = directory = editorFile = imageFile = null;
         MaterialToolbar bar = toolbar(R.layout.screen_projects);
@@ -155,6 +157,7 @@ public final class MainActivity extends AppCompatActivity {
         bar.inflateMenu(R.menu.menu_projects);
         bar.setOnMenuItemClickListener(item -> {
             if (item.getItemId() == R.id.action_import_project) { pickProject(); return true; }
+            if (item.getItemId() == R.id.action_samples) { showSamples(); return true; }
             return false;
         });
         RecyclerView list = findViewById(R.id.list);
@@ -171,6 +174,31 @@ public final class MainActivity extends AppCompatActivity {
         list.setAdapter(adapter);
         ExtendedFloatingActionButton fab = findViewById(R.id.fab);
         fab.setOnClickListener(v -> newProjectDialog());
+    }
+
+    private void showSamples() {
+        showingSamples = true;
+        MaterialToolbar bar = toolbar(R.layout.screen_samples);
+        bar.setTitle("Пакеты");
+        bar.setSubtitle("Examples • create an editable copy");
+        back(bar, this::showProjects);
+        LinearLayout list = findViewById(R.id.samples);
+        for (SampleCatalog.Sample sample : SampleCatalog.SAMPLES) {
+            View card = LayoutInflater.from(this).inflate(R.layout.item_project, list, false);
+            ((TextView) card.findViewById(R.id.name)).setText(sample.name);
+            ((TextView) card.findViewById(R.id.subtitle)).setText(sample.description);
+            MaterialButton create = card.findViewById(R.id.run);
+            create.setText("Create");
+            create.setIcon(null);
+            card.findViewById(R.id.more).setVisibility(View.GONE);
+            View.OnClickListener install = v -> {
+                try { showingSamples = false; showProject(SampleCatalog.install(getAssets(), store, sample)); }
+                catch (Exception error) { showingSamples = true; toast(error); }
+            };
+            create.setOnClickListener(install);
+            card.setOnClickListener(install);
+            list.addView(card);
+        }
     }
 
     private void newProjectDialog() {
@@ -260,7 +288,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void leavePaint() {
-        if (paintView != null && paintView.isDirty()) {
+        if (paintView != null && paintView.hasUnsavedChanges()) {
             new MaterialAlertDialogBuilder(this).setTitle("Discard unsaved drawing?")
                 .setMessage("Save the image to assets before leaving, or discard your changes.")
                 .setPositiveButton("Discard", (dialog, which) -> showDirectory(directory))
@@ -546,6 +574,7 @@ public final class MainActivity extends AppCompatActivity {
 
     @Override public void onBackPressed() {
         if (opening) return;
+        if (showingSamples) { showProjects(); return; }
         if (paintView != null) { leavePaint(); return; }
         if (running || runtimeView != null) { showProject(project); return; }
         if (editorFile != null) { if (saveEditor()) showDirectory(directory); return; }

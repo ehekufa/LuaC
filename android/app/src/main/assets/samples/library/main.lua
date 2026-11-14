@@ -1,0 +1,8 @@
+local data = require('scripts.data')
+local encoded = json.encode(data)
+local decoded = assert(json.decode(encoded))
+print('JSON:', encoded)
+print('SHA-256:', hash.sha256(decoded.message))
+print('Base64:', base64.encode(decoded.message))
+world = engine.world()
+engine.text(world, 'Built-in JSON, SHA-256 and Base64', 18, 40, 18)

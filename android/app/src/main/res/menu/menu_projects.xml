@@ -6,4 +6,5 @@
         android:icon="@drawable/ic_upload"
         android:title="Import .luac"
         app:showAsAction="always|withText" />
+    <item android:id="@+id/action_samples" android:title="Пакеты" app:showAsAction="always" />
 </menu>
