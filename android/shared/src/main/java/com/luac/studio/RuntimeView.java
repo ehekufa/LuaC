@@ -118,11 +118,11 @@ final class RuntimeView extends View {
                     Bitmap image = texture(item.optString("text"));
                     if (image != null) {
                         canvas.save(); canvas.translate(x, y);
-                        canvas.rotate((float) Math.toDegrees(item.optDouble("rotation")));
+                        canvas.rotate((float) Math.toDegrees(item.optDouble("rotation", 0)));
                         canvas.scale((float) item.optDouble("sx", 1), (float) item.optDouble("sy", 1));
                         paint.setColorFilter(new PorterDuffColorFilter(paint.getColor(), PorterDuff.Mode.MULTIPLY));
                         paint.setAlpha(Color.alpha(color(item.optJSONArray("color"))));
-                        canvas.drawBitmap(image, -(float) item.optDouble("ox"), -(float) item.optDouble("oy"), paint);
+                        canvas.drawBitmap(image, -(float) item.optDouble("ox", 0), -(float) item.optDouble("oy", 0), paint);
                         paint.setColorFilter(null); paint.setAlpha(255); canvas.restore();
                     }
                     break;
