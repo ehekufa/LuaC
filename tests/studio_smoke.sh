@@ -37,6 +37,7 @@ click_at 1172 145
 sleep 0.5
 click_at 1115 183
 sleep 0.5
+grep -q 'language=ru' "$work/studio.log"
 xclip -selection clipboard -i "$work/expected"
 click_at 80 130
 xdotool key --clearmodifiers ctrl+a

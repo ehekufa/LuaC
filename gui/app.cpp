@@ -469,8 +469,14 @@ struct App {
             nk_label(&ui, tr("Settings", "Настройки"), NK_TEXT_LEFT);
             nk_label(&ui, tr("Language", "Язык"), NK_TEXT_LEFT);
             nk_layout_row_dynamic(&ui, 30, 2);
-            if (nk_option_label(&ui, "English", !russian)) russian = false;
-            if (nk_option_label(&ui, "Русский", russian)) russian = true;
+            if (nk_option_label(&ui, "English", !russian) && russian) {
+                russian = false;
+                if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "language=en\n");
+            }
+            if (nk_option_label(&ui, "Русский", russian) && !russian) {
+                russian = true;
+                if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "language=ru\n");
+            }
             nk_layout_row_dynamic(&ui, 26, 1);
             if (nk_button_label(&ui, tr("Close", "Закрыть"))) settingsOpen = false;
         }
