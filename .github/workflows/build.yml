@@ -177,7 +177,18 @@ jobs:
       - name: Test relocated Windows package without GCC on PATH
         shell: msys2 {0}
         run: |
-          set -eu
+          set -Eeuo pipefail
+          log="$PWD/windows-tinycc-test.log"
+          exec > >(tee "$log") 2>&1
+          report_error() {
+            status=$?
+            trap - ERR
+            [ ! -f error.txt ] || cat error.txt
+            message=$(tail -c 2500 "$log" | tr '\r\n' '  ' | sed 's/%/%25/g')
+            printf '::error file=src/luac.c::Windows TinyCC test line %s: %s\n' "$1" "$message"
+            exit "$status"
+          }
+          trap 'report_error "$LINENO"' ERR
           package="$(pwd)/dist/windows"
           scratch="$(mktemp -d)/LuaC package with spaces"
           mkdir -p "$scratch"
@@ -186,7 +197,7 @@ jobs:
           unset CC
           export PATH=/usr/bin:/bin
           printf "a = 1234567\nprint(a)\n" > example.lua
-          LUAC_TRACE=1 "$scratch/install/luac.exe" example.lua > output.txt 2> error.txt || { cat error.txt; exit 1; }
+          LUAC_TRACE=1 "$scratch/install/luac.exe" example.lua > output.txt 2> error.txt
           grep -F '1234567' output.txt
           grep -i 'tcc.exe' error.txt
           "$scratch/install/luac.exe" --aot example.lua -o "$scratch/install/example.exe"
