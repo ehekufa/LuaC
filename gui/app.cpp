@@ -82,7 +82,7 @@ struct App {
     void resetEngine() {
         world = initialWorld;
         selectedEntity = world.entities().empty() ? luac::engine::invalidEntity : world.entities().front().id;
-        setOutput("Engine scene reset. Fixed step: 60 Hz.");
+        setOutput(tr("Scene reset. Fixed step: 60 Hz.", "Сцена сброшена. Шаг: 60 Гц."));
     }
     luac::engine::Entity *selected() { return world.find(selectedEntity); }
 
@@ -174,22 +174,22 @@ struct App {
     }
     void load(const char *path) {
         std::ifstream file(path, std::ios::binary);
-        if (!file) { setOutput(std::string("Cannot open: ") + path); return; }
+        if (!file) { setOutput(std::string(tr("Cannot open: ", "Не удалось открыть: ")) + path); return; }
         std::ostringstream bytes; bytes << file.rdbuf();
         std::string value = bytes.str();
         if (value.size() >= sourceStorage.size()) {
-            setOutput("File is larger than the 1 MiB editor buffer.");
+            setOutput(tr("File exceeds the 1 MiB editor buffer.", "Файл больше буфера редактора (1 МиБ)."));
             return;
         }
         setSource(value);
         filename = path; dirty = false;
-        setOutput(std::string("Opened ") + path);
+        setOutput(std::string(tr("Opened ", "Открыт: ")) + path);
     }
     void save() {
         std::ofstream file(filename, std::ios::binary | std::ios::trunc);
-        if (!file) { setOutput("Save failed: " + filename); return; }
+        if (!file) { setOutput(std::string(tr("Save failed: ", "Не удалось сохранить: ")) + filename); return; }
         file.write(sourceStorage.data(), sourceLength);
-        dirty = false; setOutput("Saved " + filename);
+        dirty = false; setOutput(std::string(tr("Saved ", "Сохранён: ")) + filename);
     }
     static std::string quote(const std::string &value) {
 #ifdef _WIN32
@@ -205,11 +205,11 @@ struct App {
     void execute(const std::string &arguments) {
         std::string command = quote(compiler) + " " + arguments + " 2>&1";
         FILE *pipe = popen(command.c_str(), "r");
-        if (!pipe) { setOutput(std::string("Cannot start compiler: ") + std::strerror(errno)); return; }
+        if (!pipe) { setOutput(std::string(tr("Cannot start compiler: ", "Не удалось запустить компилятор: ")) + std::strerror(errno)); return; }
         char buffer[1024]; std::string log;
         while (fgets(buffer, sizeof(buffer), pipe)) log += buffer;
         int status = pclose(pipe);
-        setOutput(log.empty() ? (status == 0 ? "Done." : "Compiler failed.") : log);
+        setOutput(log.empty() ? (status == 0 ? tr("Done.", "Готово.") : tr("Compiler failed.", "Ошибка компилятора.")) : log);
     }
     void run() {
         if (dirty) save();
@@ -368,7 +368,7 @@ struct App {
                 if (entity.id == selectedEntity) nk_stroke_rect(commands, nk_rect(rectangle.x - 3, rectangle.y - 3,
                     rectangle.w + 6, rectangle.h + 6), 5, 2, nk_rgb(240, 240, 210));
                 nk_draw_text(commands, nk_rect(rectangle.x, rectangle.y + rectangle.h + 4, 140, 18), entity.name.c_str(),
-                             static_cast<int>(entity.name.size()), font, nk_rgb(0, 0, 0), nk_rgb(205, 220, 235));
+                             static_cast<int>(entity.name.size()), font, nk_rgb(0, 0, 0), nk_rgb(255, 255, 255));
                 if (nk_input_is_mouse_click_in_rect(&ui.input, NK_BUTTON_LEFT, rectangle)) selectedEntity = entity.id;
             }
             for (const auto &text : world.overlayText) {
@@ -450,9 +450,9 @@ struct App {
             nk_layout_row_dynamic(&ui, 18, 1);
             char status[160];
             if (engineMode)
-                std::snprintf(status, sizeof(status), "ENGINE  |  %zu entities  |  %s  |  F7 editor  |  Native C++17 world", world.count(), world.running() ? "playing" : "paused");
+                std::snprintf(status, sizeof(status), tr("ENGINE  |  %zu entities  |  %s  |  F7 editor", "ДВИЖОК  |  объектов: %zu  |  %s  |  F7 editor"), world.count(), world.running() ? tr("playing", "запущен") : tr("paused", "пауза"));
             else
-                std::snprintf(status, sizeof(status), "%d bytes  |  Nuklear C99  |  Vulkan  |  F5 run  F6 check  F7 engine  Ctrl+S save", sourceLength);
+                std::snprintf(status, sizeof(status), tr("%d bytes  |  Vulkan  |  F5 run  F6 check  F7 engine  Ctrl+S save", "%d байт  |  Vulkan  |  F5 run  F6 check  F7 engine  Ctrl+S save"), sourceLength);
             nk_label(&ui, status, NK_TEXT_LEFT);
         }
         nk_end(&ui);
