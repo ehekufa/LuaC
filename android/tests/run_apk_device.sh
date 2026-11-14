@@ -13,6 +13,22 @@ report_failure() {
 }
 trap 'report_failure "$LINENO"' ERR
 
+wait_for_output() {
+  local expected="$1" attempt
+  for attempt in $(seq 1 15); do
+    if adb shell uiautomator dump /sdcard/luac-window.xml >/dev/null 2>&1 &&
+       adb shell cat /sdcard/luac-window.xml > /tmp/luac-window.xml &&
+       grep -qF "$expected" /tmp/luac-window.xml; then
+      echo "Found: $expected"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Timed out waiting for: $expected"
+  cat /tmp/luac-window.xml 2>/dev/null || true
+  return 1
+}
+
 gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
@@ -32,21 +48,13 @@ second=$($AAPT dump badging /tmp/luac-project-second.apk | sed -n "s/^package: n
 adb install -r /tmp/luac-project-test.apk
 adb install -r /tmp/luac-project-second.apk
 adb shell am start -n "$first/com.luac.studio.MainActivity"
-sleep 10
-adb shell uiautomator dump /sdcard/luac-window.xml
-adb shell cat /sdcard/luac-window.xml | grep 'PROJECT APK DEVICE OK'
+wait_for_output 'PROJECT APK DEVICE OK'
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1
-sleep 5
-adb shell uiautomator dump /sdcard/luac-window.xml
-adb shell cat /sdcard/luac-window.xml | grep 'PROJECT APK DEVICE OK'
+wait_for_output 'PROJECT APK DEVICE OK'
 adb shell settings put system user_rotation 0
 adb install -r /tmp/luac-project-update.apk
 adb shell am start -n "$first/com.luac.studio.MainActivity"
-sleep 10
-adb shell uiautomator dump /sdcard/luac-window.xml
-adb shell cat /sdcard/luac-window.xml | grep 'UPDATED APK DEVICE OK'
+wait_for_output 'UPDATED APK DEVICE OK'
 adb shell am start -n "$second/com.luac.studio.MainActivity"
-sleep 10
-adb shell uiautomator dump /sdcard/luac-window.xml
-adb shell cat /sdcard/luac-window.xml | grep 'SECOND APK DEVICE OK'
+wait_for_output 'SECOND APK DEVICE OK'
