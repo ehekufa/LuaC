@@ -214,7 +214,11 @@ jobs:
           mkdir -p dist/windows
           cp luac.exe build/libluac.a build/libluac.dll src/luac.h src/runtime.h src/luac_interpreter.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/engine.hpp README.md LICENSE dist/windows/
           cp -r src/third_party examples dist/windows/
-          cp /ucrt64/bin/libmbed*.dll /ucrt64/bin/libwinpthread-1.dll dist/windows/
+          cp /ucrt64/bin/libmbed*.dll /ucrt64/bin/libwinpthread-1.dll /ucrt64/bin/libgcc_s_seh-1.dll dist/windows/
+          mkdir -p dist/windows/licenses
+          for component in mbedtls libwinpthread libgcc gcc-libs cc-libs; do
+            if [ -d "/ucrt64/share/licenses/$component" ]; then cp -r "/ucrt64/share/licenses/$component" dist/windows/licenses/; fi
+          done
           7z a -tzip dist/LuaC-windows-x86_64.zip ./dist/windows/*
       - name: Test relocated Windows package without GCC on PATH
         shell: msys2 {0}
@@ -227,7 +231,7 @@ jobs:
             trap - ERR
             [ ! -f error.txt ] || cat error.txt
             echo 'DLL dependencies:'
-            for dll in "$scratch"/install/*.dll "$(cygpath -u "$TEMP")"/luac-*/main.c.dll; do
+            for dll in "${scratch:-/nonexistent}"/install/*.dll "$(cygpath -u "$TEMP")"/luac-*/main.c.dll; do
               [ -f "$dll" ] || continue
               echo "$(basename "$dll")"
               /ucrt64/bin/objdump -p "$dll" | grep 'DLL Name:' || true
