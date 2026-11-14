@@ -6,17 +6,18 @@ report_failure() {
   status=$?
   trap - ERR
   echo "Device APK test failed at line $1 (exit $status)"
-  for report in app/build/outputs/androidTest-results/connected/debug/*.xml; do
-    [ -f "$report" ] && cat "$report" || true
-  done
-  adb logcat -d -t 2500 2>/dev/null | grep -E 'AndroidRuntime|FATAL EXCEPTION|Caused by:|luac|LuaC' | tail -100 || true
-  message=$(tail -c 3000 "$log" | tr '\r\n' '  ' | sed 's/%/%25/g')
+  adb logcat -d -t 2500 2>/dev/null | grep -E 'AndroidRuntime|FATAL EXCEPTION|Caused by:' | tail -30 || true
+  message=$(grep -E -i -A 6 'failed|exception|error|caused by|invalid|tests? (passed|failed)|^ok |^success|^verifies|instrumentation_' "$log" | tail -c 3000 | tr '\r\n' '  ' | sed 's/%/%25/g' || true)
   printf '::error file=android/tests/run_apk_device.sh::%s\n' "$message"
   exit "$status"
 }
 trap 'report_failure "$LINENO"' ERR
 
-gradle --no-daemon :app:connectedDebugAndroidTest
+gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb shell am instrument -w -r com.luac.studio.test/androidx.test.runner.AndroidJUnitRunner | tee /tmp/luac-instrument.log
+grep -q 'OK (1 test)' /tmp/luac-instrument.log
 adb exec-out run-as com.luac.studio cat files/device-project.apk > /tmp/luac-project-test.apk
 "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose /tmp/luac-project-test.apk
 "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c 4 /tmp/luac-project-test.apk
