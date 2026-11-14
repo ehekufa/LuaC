@@ -24,15 +24,21 @@ window=$(timeout 20s xdotool search --sync --onlyvisible --name 'LuaC Studio' | 
 xdotool windowfocus --sync "$window"
 sleep 2
 kill -0 "$pid" || { cat "$work/studio.log"; exit 1; }
+# Keep each press down long enough for a software-rendered frame.
+click_at() {
+  xdotool mousemove --window "$window" "$1" "$2" mousedown 1
+  sleep 0.3
+  xdotool mouseup 1
+}
 # Open Settings, choose Russian, close it, then edit via the X11 clipboard.
-xdotool mousemove --window "$window" 925 36 click 1
+click_at 925 36
 sleep 0.5
-xdotool mousemove --window "$window" 1172 145 click 1
+click_at 1172 145
 sleep 0.5
-xdotool mousemove --window "$window" 1115 183 click 1
+click_at 1115 183
 sleep 0.5
 xclip -selection clipboard -i "$work/expected"
-xdotool mousemove --window "$window" 80 130 click 1
+click_at 80 130
 xdotool key --clearmodifiers ctrl+a
 sleep 0.3
 xdotool key --clearmodifiers ctrl+v

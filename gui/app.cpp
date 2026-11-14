@@ -48,6 +48,7 @@ struct App {
     double mouseX = 0, mouseY = 0;
     bool dirty = false;
     bool controlDown = false;
+    nk_keys pressedKeys[GLFW_KEY_LAST + 1]{};
     bool engineMode = false;
     luac::engine::World world;
     std::unordered_map<std::string, uint32_t> textureIds;
@@ -550,6 +551,14 @@ void key(GLFWwindow *window, int keyCode, int, int action, int mods) {
     case GLFW_KEY_Z: if (a->controlDown) mapped = NK_KEY_TEXT_UNDO; break;
     case GLFW_KEY_Y: if (a->controlDown) mapped = NK_KEY_TEXT_REDO; break;
     default: break;
+    }
+    if (keyCode >= 0 && keyCode <= GLFW_KEY_LAST) {
+        if (action == GLFW_RELEASE) {
+            mapped = a->pressedKeys[keyCode];
+            a->pressedKeys[keyCode] = NK_KEY_NONE;
+        } else if (action == GLFW_PRESS) {
+            a->pressedKeys[keyCode] = mapped;
+        }
     }
     if (mapped != NK_KEY_NONE) nk_input_key(&a->ui, mapped, down);
 }
