@@ -1015,6 +1015,41 @@ static char *luac_mkdtemp(char *template_name) {
     return NULL;
 }
 #define mkdtemp luac_mkdtemp
+
+/* CreateProcess expects a single command line, not argv. Quote every argument
+   using the Microsoft C runtime's backslash/quote decoding rules. */
+static void windows_append_arg(Str *command, const char *arg) {
+    const char *p = arg;
+    if (command->len) sb_add(command, " ");
+    sb_add(command, "\"");
+    while (*p) {
+        size_t slashes = 0, i;
+        while (*p == '\\') { ++slashes; ++p; }
+        if (*p == '"' || *p == 0) {
+            for (i = 0; i < slashes * 2 + (*p == '"' ? 1 : 0); ++i) sb_add(command, "\\");
+        } else for (i = 0; i < slashes; ++i) sb_add(command, "\\");
+        if (*p) { sb_n(command, p, 1); ++p; }
+    }
+    sb_add(command, "\"");
+}
+static int windows_spawn_compiler(const char *cc, const char *const *args) {
+    STARTUPINFOA startup;
+    PROCESS_INFORMATION process;
+    DWORD status = 1;
+    Str command; int i;
+    sb_init(&command);
+    for (i = 0; args[i]; ++i) windows_append_arg(&command, args[i]);
+    memset(&startup, 0, sizeof(startup)); startup.cb = sizeof(startup);
+    memset(&process, 0, sizeof(process));
+    if (!CreateProcessA(NULL, command.data, NULL, NULL, TRUE, 0, NULL, NULL, &startup, &process)) {
+        fprintf(stderr, "luac: cannot start C compiler '%s' (Windows error %lu); use --cc to select one\n", cc, GetLastError());
+        sb_free(&command); return -1;
+    }
+    WaitForSingleObject(process.hProcess, INFINITE);
+    if (!GetExitCodeProcess(process.hProcess, &status)) status = 1;
+    CloseHandle(process.hThread); CloseHandle(process.hProcess);
+    sb_free(&command); return (int)status;
+}
 #endif
 static char *read_file(const char*path,size_t*n){FILE*f=fopen(path,"rb");char*s;long size;if(!f){fprintf(stderr,"luac: cannot open %s: %s\n",path,strerror(errno));return NULL;}fseek(f,0,SEEK_END);size=ftell(f);fseek(f,0,SEEK_SET);if(size<0){fclose(f);return NULL;}s=xmalloc((size_t)size+1);if(fread(s,1,(size_t)size,f)!=(size_t)size){fclose(f);free(s);return NULL;}s[size]=0;fclose(f);*n=(size_t)size;return s;}
 static int write_file(const char*path,const char*data,size_t n){FILE*f=fopen(path,"wb");if(!f)return 0;if(fwrite(data,1,n,f)!=n){fclose(f);return 0;}return fclose(f)==0;}
@@ -1099,8 +1134,7 @@ int main(int argc,char**argv){
       free(qso);}
      if(getenv("LUAC_TRACE"))fprintf(stderr,"luac: native command: %s\n",cmd.data);
 #ifdef _WIN32
-     /* Do not pass Windows paths through cmd.exe. _spawnvp quotes each argv
-        element using the C runtime rules, including paths containing spaces. */
+     /* Pass an explicitly quoted command line directly to CreateProcess, not cmd.exe. */
      {char *cresponse=NULL,*lresponse=NULL,*cresponse_arg=NULL,*lresponse_arg=NULL;size_t response_length=strlen(cfile)+12;
       if(extra_cflags.data&&*extra_cflags.data){
           FILE*file;cresponse=xmalloc(response_length);snprintf(cresponse,response_length,"%s.c.rsp",cfile);
@@ -1119,8 +1153,7 @@ int main(int argc,char**argv){
         args[n++]="-lm"; args[n++]="-lws2_32";
         if(lresponse_arg) args[n++]=lresponse_arg;
         args[n]=NULL;
-        cr=(int)_spawnvp(_P_WAIT,cc,args);
-        if(cr==-1) fprintf(stderr,"luac: cannot start C compiler '%s': %s (use --cc to select one)\n",cc,strerror(errno));
+        cr=windows_spawn_compiler(cc,args);
       }
       if(cresponse){unlink(cresponse);free(cresponse);free(cresponse_arg);}
       if(lresponse){unlink(lresponse);free(lresponse);free(lresponse_arg);}}
