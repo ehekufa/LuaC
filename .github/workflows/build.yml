@@ -28,7 +28,16 @@ jobs:
           curl -fL https://codeload.github.com/tinycc/tinycc/tar.gz/f830a1697e159056b75de40a60464bc43ee670a3 -o /tmp/tinycc.tar.gz
           tar -xzf /tmp/tinycc.tar.gz -C /tmp/tinycc-src --strip-components=1
           (cd /tmp/tinycc-src && ./configure --prefix=/tmp/tinycc-install && make -j2 && make install)
-          TCC=/tmp/tinycc-install/bin/tcc ./tests/test_tinycc.sh
+          set +e
+          TCC=/tmp/tinycc-install/bin/tcc ./tests/test_tinycc.sh > tinycc-test.log 2>&1
+          status=$?
+          set -e
+          cat tinycc-test.log
+          if [ "$status" -ne 0 ]; then
+            message=$(tail -c 6000 tinycc-test.log | tr '\r\n' '  ' | sed 's/%/%25/g')
+            printf '::error file=tests/test_tinycc.sh::%s\n' "$message"
+            exit "$status"
+          fi
       - name: CMake package and consumer test
         run: |
           set +e
@@ -161,6 +170,8 @@ jobs:
           cp src/third_party/tcc_compat/strings.h dist/windows/tcc/include/
           cp src/third_party/tcc_compat/crypt32.def dist/windows/tcc/lib/
           cp -r /ucrt64/include/mbedtls /ucrt64/include/psa dist/windows/tcc/include/
+          # The diagnostic attribute requires GCC or Clang, not TinyCC.
+          sed -i '/^#define MBEDTLS_DEPRECATED_WARNING$/c\#if !defined(__TINYC__)\n#define MBEDTLS_DEPRECATED_WARNING\n#endif' dist/windows/tcc/include/mbedtls/mbedtls_config.h
           for lib in mbedtls mbedx509 mbedcrypto; do
             set -- /ucrt64/bin/lib${lib}*.dll
             [ "$#" -eq 1 ] && [ -f "$1" ]
