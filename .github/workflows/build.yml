@@ -111,6 +111,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             make
             p7zip
+            diffutils
             mingw-w64-ucrt-x86_64-mbedtls
       - name: Build CLI
         shell: msys2 {0}
@@ -157,7 +158,17 @@ jobs:
       - name: Build bundled TinyCC
         shell: msys2 {0}
         run: |
-          set -eu
+          set -Eeuo pipefail
+          log="$PWD/windows-tinycc-build.log"
+          exec > >(tee "$log") 2>&1
+          report_error() {
+            status=$?
+            trap - ERR
+            message=$(tail -c 6000 "$log" | tr '\r\n' '  ' | sed 's/%/%25/g')
+            printf '::error file=.github/workflows/build.yml::TinyCC build line %s: %s\n' "$1" "$message"
+            exit "$status"
+          }
+          trap 'report_error "$LINENO"' ERR
           mkdir -p build/tinycc dist/windows/tcc
           curl -fL https://codeload.github.com/tinycc/tinycc/tar.gz/f830a1697e159056b75de40a60464bc43ee670a3 -o build/tinycc-source.tar.gz
           tar -xzf build/tinycc-source.tar.gz -C build/tinycc --strip-components=1
