@@ -24,7 +24,7 @@ int main(void) {
             fprintf(stderr, "%s failed: %s\n", ids[i], frame ? frame : "null");
             luac_free(frame); luac_project_close(project); return 1;
         }
-        if (i == 4 && (!strstr(frame, "\"kind\":1") || !strstr(frame, "\"kind\":2") || !strstr(frame, "\"kind\":3"))) {
+        if (i == 4 && (!strstr(frame, "\"kind\":1") || !strstr(frame, "\"kind\":2") || !strstr(frame, "\"kind\":3") || !strstr(frame, "\"kind\":4") || !strstr(frame, "assets/luac_logo.png"))) {
             fprintf(stderr, "LÖVE draw commands missing: %s\n", frame); luac_free(frame); luac_project_close(project); return 1;
         }
         luac_free(frame);

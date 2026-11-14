@@ -27,7 +27,10 @@ final class SampleCatalog {
         ProjectArchive.Document document = new ProjectArchive.Document(sample.name);
         document.directories.add("scripts");
         document.directories.add("assets");
-        for (String path : new String[] {"main.lua", "scripts/" + sample.module}) {
+        String[] paths = sample.id.equals("love")
+            ? new String[] {"main.lua", "scripts/" + sample.module, "assets/luac_logo.png"}
+            : new String[] {"main.lua", "scripts/" + sample.module};
+        for (String path : paths) {
             try (InputStream in = assets.open("samples/" + sample.id + "/" + path);
                  ByteArrayOutputStream out = new ByteArrayOutputStream()) {
                 byte[] buffer = new byte[4096];

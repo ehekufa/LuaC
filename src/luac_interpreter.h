@@ -38,7 +38,7 @@ struct LiModule {
 typedef struct {
     char *text;
     int kind, line;
-    double x, y, w, h, color[4];
+    double x, y, w, h, rotation, scale_x, scale_y, origin_x, origin_y, color[4];
 } LiDrawCommand;
 typedef struct {
     LcContext *ctx;
