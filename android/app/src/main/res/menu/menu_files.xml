@@ -18,6 +18,7 @@
         android:id="@+id/action_import"
         android:icon="@drawable/ic_upload"
         android:title="Import asset" />
+    <item android:id="@+id/action_build_apk" android:title="Build project APK" />
     <item android:id="@+id/action_paint" android:title="Paint — new image" />
     <item
         android:id="@+id/action_export_project"

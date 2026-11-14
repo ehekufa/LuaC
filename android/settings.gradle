@@ -6,4 +6,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = 'LuaCStudio'
-include ':app'
+include ':app', ':runner'

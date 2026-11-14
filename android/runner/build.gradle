@@ -1,0 +1,22 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.luac.studio'
+    compileSdk 35
+    ndkVersion '27.2.12479018'
+    sourceSets.main.java.srcDir '../shared/src/main/java'
+    defaultConfig {
+        applicationId 'com.luac.projectrunner'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+        externalNativeBuild { cmake { cppFlags '-std=c++17' } }
+    }
+    externalNativeBuild {
+        cmake { path '../app/src/main/cpp/CMakeLists.txt'; version '3.22.1' }
+    }
+    buildTypes { release { minifyEnabled false } }
+    // Repacked APKs don't have zipaligned native libs; Android must extract them.
+    packaging { jniLibs { useLegacyPackaging true } }
+}

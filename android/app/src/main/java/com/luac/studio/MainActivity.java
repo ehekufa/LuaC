@@ -38,6 +38,7 @@ public final class MainActivity extends AppCompatActivity {
     private static final int PICK_ASSET = 41;
     private static final int IMPORT_PROJECT = 42;
     private static final int EXPORT_PROJECT = 43;
+    private static final int BUILD_APK = 44;
 
     private static boolean nativeAvailable;
     private static String nativeLoadError = "";
@@ -59,7 +60,7 @@ public final class MainActivity extends AppCompatActivity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private ProjectStore store;
-    private File project, directory, editorFile, imageFile, importDirectory, exportProject;
+    private File project, directory, editorFile, imageFile, importDirectory, exportProject, apkProject;
     private EditText editor;
     private TextView output;
     private RuntimeView runtimeView;
@@ -90,6 +91,8 @@ public final class MainActivity extends AppCompatActivity {
         if (state != null) {
             String pending = state.getString("exportProject");
             if (pending != null) exportProject = new File(pending);
+            String apkPending = state.getString("apkProject");
+            if (apkPending != null) apkProject = new File(apkPending);
             String paintProject = state.getString("paintProject"), draft = state.getString("paintDraft");
             if (paintProject != null && draft != null) {
                 File saved = new File(draft);
@@ -110,6 +113,7 @@ public final class MainActivity extends AppCompatActivity {
 
     @Override protected void onSaveInstanceState(Bundle state) {
         if (exportProject != null) state.putString("exportProject", exportProject.getAbsolutePath());
+        if (apkProject != null) state.putString("apkProject", apkProject.getAbsolutePath());
         if (paintView != null && project != null) {
             File draft = null;
             try {
@@ -232,6 +236,7 @@ public final class MainActivity extends AppCompatActivity {
             else if (item.getItemId() == R.id.action_import) pickAsset();
             else if (item.getItemId() == R.id.action_paint) showPaint();
             else if (item.getItemId() == R.id.action_export_project) exportProject(project);
+            else if (item.getItemId() == R.id.action_build_apk) chooseApkDestination(project);
             return true;
         });
         RecyclerView list = findViewById(R.id.list);
@@ -455,6 +460,51 @@ public final class MainActivity extends AppCompatActivity {
         runtimeView = null;
     }
 
+    private void chooseApkDestination(File selected) {
+        if (!new File(selected, "main.lua").isFile()) { toast("main.lua is missing"); return; }
+        new MaterialAlertDialogBuilder(this).setTitle("Build standalone APK")
+            .setMessage("The APK contains the project and LuaC runtime. Current builds share the same app ID, so only one LuaC project APK can be installed at a time. The signing key stays on this device; reinstalling Studio can prevent updates to previously built APKs.")
+            .setPositiveButton("Choose destination", (dialog, which) -> {
+                apkProject = selected;
+                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("application/vnd.android.package-archive");
+                intent.putExtra(Intent.EXTRA_TITLE, selected.getName() + ".apk");
+                startActivityForResult(intent, BUILD_APK);
+            }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void buildApk(Uri destination, File selected) {
+        toast("Building and signing APK…");
+        new Thread(() -> {
+            File unsigned = null, signed = null;
+            try {
+                // Fail early if the project was deleted or moved while the picker was open.
+                if (selected.getParentFile() == null || !selected.getParentFile().getCanonicalFile().equals(store.root.getCanonicalFile()))
+                    throw new IOException("Project is outside the projects folder");
+                unsigned = File.createTempFile("luac-unsigned-", ".apk", getCacheDir());
+                signed = File.createTempFile("luac-signed-", ".apk", getCacheDir());
+                ApkSigningKey signing = ApkSigningKey.load();
+                try (InputStream template = getAssets().open("runner-template.apk")) {
+                    ApkBuilder.build(template, selected, unsigned, signed, signing.key, signing.certificate);
+                }
+                try (InputStream input = new java.io.FileInputStream(signed);
+                     OutputStream output = getContentResolver().openOutputStream(destination, "wt")) {
+                    if (output == null) throw new IOException("Cannot write the APK destination");
+                    byte[] buffer = new byte[65536];
+                    int count;
+                    while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                }
+                handler.post(() -> { if (!destroyed) toast("Signed project APK saved"); });
+            } catch (Exception error) {
+                handler.post(() -> { if (!destroyed) toast(error); });
+            } finally {
+                if (unsigned != null) unsigned.delete();
+                if (signed != null) signed.delete();
+            }
+        }, "LuaC-apk-builder").start();
+    }
+
     private void pickProject() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -512,6 +562,12 @@ public final class MainActivity extends AppCompatActivity {
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == BUILD_APK) {
+            File selected = apkProject; apkProject = null;
+            if (result == RESULT_OK && data != null && data.getData() != null && selected != null)
+                buildApk(data.getData(), selected);
+            return;
+        }
         if (request == EXPORT_PROJECT) {
             File selected = exportProject;
             exportProject = null;

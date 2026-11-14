@@ -161,18 +161,7 @@ final class ProjectStore {
         // Build outside the project list; an incomplete import must never appear as a project.
         File project = Files.createTempDirectory(root.getParentFile().toPath(), ".luac-import-").toFile();
         try {
-            for (String path : document.directories) {
-                File directory = resolve(project, path);
-                if (!directory.isDirectory() && !directory.mkdirs())
-                    throw new IOException("Cannot create directory: " + path);
-            }
-            for (ProjectArchive.Entry entry : document.files) {
-                File file = resolve(project, entry.path);
-                File parent = file.getParentFile();
-                if (!parent.isDirectory() && !parent.mkdirs())
-                    throw new IOException("Cannot create directory for " + entry.path);
-                try (FileOutputStream output = new FileOutputStream(file)) { output.write(entry.bytes); }
-            }
+            ProjectFiles.write(document, project);
             File destination = unique(root, safeName(document.name, "Project"));
             Files.move(project.toPath(), destination.toPath());
             return destination;
