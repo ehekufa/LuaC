@@ -51,8 +51,10 @@ adb shell am start -n "$first/com.luac.studio.MainActivity"
 wait_for_output 'PROJECT APK DEVICE OK'
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1
+sleep 5
 wait_for_output 'PROJECT APK DEVICE OK'
 adb shell settings put system user_rotation 0
+sleep 5
 adb install -r /tmp/luac-project-update.apk
 adb shell am start -n "$first/com.luac.studio.MainActivity"
 wait_for_output 'UPDATED APK DEVICE OK'
