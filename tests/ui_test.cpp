@@ -1,4 +1,5 @@
 #include "nuklear_canvas.hpp"
+#include "color_wheel.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -154,6 +155,30 @@ int main() {
     frame(ui, canvas, clicked, source, sourceLength, buttonBounds);
     bool atlasDraw = false; for (const auto &draw : canvas.draws) if (draw.texture == 1) atlasDraw = true;
     assert(atlasDraw);
+    /* A click on the hue ring changes the selected color. */
+    ColorWheel wheel(nk_rgb(75, 220, 181));
+    nk_color initial = wheel.color();
+    struct nk_rect wheelBounds{};
+    auto wheelFrame = [&]() {
+        bool changed = false;
+        if (nk_begin(&ui, "wheel", nk_rect(0, 0, 320, 320), NK_WINDOW_NO_SCROLLBAR)) {
+            nk_layout_row_dynamic(&ui, 260, 1);
+            wheelBounds = nk_widget_bounds(&ui);
+            changed = wheel.draw(&ui);
+        }
+        nk_end(&ui);
+        canvas.render(ui, 480, 320); nk_clear(&ui);
+        return changed;
+    };
+    nk_input_begin(&ui); nk_input_end(&ui); wheelFrame();
+    int wheelX = static_cast<int>(wheelBounds.x + wheelBounds.w/2 + 105);
+    int wheelY = static_cast<int>(wheelBounds.y + wheelBounds.h/2);
+    nk_input_begin(&ui); nk_input_motion(&ui, wheelX, wheelY);
+    nk_input_button(&ui, NK_BUTTON_LEFT, wheelX, wheelY, nk_true); nk_input_end(&ui);
+    assert(wheelFrame());
+    assert(wheel.color().r != initial.r || wheel.color().g != initial.g || wheel.color().b != initial.b);
+    nk_input_begin(&ui); nk_input_button(&ui, NK_BUTTON_LEFT, wheelX, wheelY, nk_false); nk_input_end(&ui); wheelFrame();
+
     /* Engine text uses the same metrics at larger sizes. */
     nk_user_font scaled = *font;
     scaled.height = 32;

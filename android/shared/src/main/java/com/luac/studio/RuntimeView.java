@@ -49,11 +49,14 @@ final class RuntimeView extends View {
 
     private float screenX(double x) { return (float) (getWidth() * 0.5 + (x - cameraX) * zoom); }
     private float screenY(double y) { return (float) (getHeight() * 0.5 + (y - cameraY) * zoom); }
-    private double worldX(float x) { return (x - getWidth() * 0.5) / zoom + cameraX; }
-    private double worldY(float y) { return (y - getHeight() * 0.5) / zoom + cameraY; }
+    private boolean loveMode() { return frame != null && frame.optJSONObject("love") != null; }
+    private double worldX(float x) { return loveMode() && loveScale() > 0 ? (x - loveLeft()) / loveScale() : (x - getWidth() * 0.5) / zoom + cameraX; }
+    private double worldY(float y) { return loveMode() && loveScale() > 0 ? (y - loveTop()) / loveScale() : (y - getHeight() * 0.5) / zoom + cameraY; }
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+        JSONObject love = frame == null ? null : frame.optJSONObject("love");
+        if (love != null) { drawLove(canvas, love); return; }
         canvas.drawColor(Color.rgb(7, 13, 20));
         paint.setStrokeWidth(1);
         paint.setColor(Color.rgb(14, 29, 40));
@@ -82,6 +85,37 @@ final class RuntimeView extends View {
             paint.setTextSize((float) text.optDouble("size", 16));
             canvas.drawText(text.optString("text"), (float) text.optDouble("x"), (float) text.optDouble("y"), paint);
         }
+    }
+
+    private float loveScale() { return Math.min(getWidth() / 800f, getHeight() / 600f); }
+    private float loveLeft() { return (getWidth() - 800 * loveScale()) / 2; }
+    private float loveTop() { return (getHeight() - 600 * loveScale()) / 2; }
+    private void drawLove(Canvas canvas, JSONObject love) {
+        canvas.drawColor(Color.BLACK);
+        float scale = loveScale();
+        if (scale <= 0) return;
+        canvas.save(); canvas.translate(loveLeft(), loveTop()); canvas.scale(scale, scale);
+        canvas.clipRect(0, 0, 800, 600);
+        paint.setStyle(Paint.Style.FILL); paint.setColor(color(love.optJSONArray("background")));
+        canvas.drawRect(0, 0, 800, 600, paint);
+        JSONArray commands = love.optJSONArray("commands");
+        if (commands != null) for (int i = 0; i < commands.length(); ++i) {
+            JSONObject item = commands.optJSONObject(i);
+            if (item == null) continue;
+            paint.setColor(color(item.optJSONArray("color")));
+            paint.setStyle(item.optBoolean("line") ? Paint.Style.STROKE : Paint.Style.FILL);
+            paint.setStrokeWidth(1);
+            float x = (float) item.optDouble("x"), y = (float) item.optDouble("y");
+            float w = (float) item.optDouble("w"), h = (float) item.optDouble("h");
+            switch (item.optInt("kind")) {
+                case 1: canvas.drawRect(x, y, x + w, y + h, paint); break;
+                case 2: if (w >= 0) canvas.drawCircle(x, y, w, paint); break;
+                case 3: paint.setStyle(Paint.Style.FILL); paint.setTextSize(16);
+                    canvas.drawText(item.optString("text"), x, y - paint.ascent(), paint); break;
+                default: break;
+            }
+        }
+        paint.setStyle(Paint.Style.FILL); canvas.restore();
     }
 
     private void drawEntity(Canvas canvas, JSONObject entity) {

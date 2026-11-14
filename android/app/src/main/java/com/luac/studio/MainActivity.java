@@ -15,6 +15,7 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
@@ -32,6 +33,8 @@ import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.FileOutputStream;
+import java.util.Locale;
+import java.util.function.IntConsumer;
 import org.json.JSONObject;
 
 public final class MainActivity extends AppCompatActivity {
@@ -138,6 +141,7 @@ public final class MainActivity extends AppCompatActivity {
         MaterialToolbar bar = findViewById(R.id.toolbar);
         bar.setTitleTextColor(Color.WHITE);
         bar.setSubtitleTextColor(Color.WHITE);
+        bar.post(() -> StudioTheme.apply(getWindow().getDecorView(), StudioTheme.color(this)));
         return bar;
     }
     private void back(MaterialToolbar bar, Runnable action) {
@@ -162,6 +166,7 @@ public final class MainActivity extends AppCompatActivity {
         bar.setOnMenuItemClickListener(item -> {
             if (item.getItemId() == R.id.action_import_project) { pickProject(); return true; }
             if (item.getItemId() == R.id.action_samples) { showSamples(); return true; }
+            if (item.getItemId() == R.id.action_settings) { showSettings(); return true; }
             return false;
         });
         RecyclerView list = findViewById(R.id.list);
@@ -178,6 +183,40 @@ public final class MainActivity extends AppCompatActivity {
         list.setAdapter(adapter);
         ExtendedFloatingActionButton fab = findViewById(R.id.fab);
         fab.setOnClickListener(v -> newProjectDialog());
+    }
+
+    private void showSettings() {
+        showColorDialog("Settings · Theme color", StudioTheme.color(this), true, color -> {
+            StudioTheme.save(this, color);
+            StudioTheme.apply(getWindow().getDecorView(), color);
+        });
+    }
+
+    private void showColorDialog(String title, int initial, boolean reset, IntConsumer onApply) {
+        int padding = (int) (20 * getResources().getDisplayMetrics().density);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(padding, 0, padding, padding);
+        ColorWheelView wheel = new ColorWheelView(this, initial);
+        content.addView(wheel, new LinearLayout.LayoutParams(-1, -2));
+        TextView preview = new TextView(this);
+        preview.setTextColor(Color.WHITE);
+        preview.setPadding(padding, padding / 2, padding, padding / 2);
+        content.addView(preview, new LinearLayout.LayoutParams(-1, -2));
+        IntConsumer update = color -> {
+            preview.setText(String.format(Locale.ROOT, "#%06X", color & 0xffffff));
+            preview.setBackgroundColor(StudioTheme.dark(color));
+        };
+        update.accept(initial);
+        wheel.setListener(update::accept);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(content);
+        MaterialAlertDialogBuilder dialog = new MaterialAlertDialogBuilder(this)
+            .setTitle(title).setView(scroll)
+            .setPositiveButton("Apply", (d, which) -> onApply.accept(wheel.getColor()))
+            .setNegativeButton("Cancel", null);
+        if (reset) dialog.setNeutralButton("Default", (d, which) -> onApply.accept(StudioTheme.defaultColor()));
+        dialog.show();
     }
 
     private void showSamples() {
@@ -261,12 +300,11 @@ public final class MainActivity extends AppCompatActivity {
         paintView = new PaintView(this);
         FrameLayout canvas = findViewById(R.id.paint_canvas);
         canvas.addView(paintView, new FrameLayout.LayoutParams(-1, -1));
-        int[] colors = {Color.BLACK, Color.WHITE, 0xffe53935, 0xffff9800, 0xffffeb3b,
-            0xff43a047, 0xff1e88e5, 0xff8e24aa, 0xff795548};
-        String[] names = {"Black", "White", "Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Brown"};
-        findViewById(R.id.paint_color).setOnClickListener(v ->
-            new MaterialAlertDialogBuilder(this).setTitle("Brush color")
-                .setItems(names, (dialog, which) -> { paintView.setBrushColor(colors[which]); toast(names[which] + " brush"); }).show());
+        MaterialButton colorButton = findViewById(R.id.paint_color);
+        colorButton.setOnClickListener(v -> showColorDialog("Brush color", paintView.getBrushColor(), false, color -> {
+            paintView.setBrushColor(color);
+            colorButton.setText(String.format(Locale.ROOT, "Color #%06X", color & 0xffffff));
+        }));
         findViewById(R.id.paint_eraser).setOnClickListener(v -> { paintView.setEraser(); toast("Eraser"); });
         findViewById(R.id.paint_undo).setOnClickListener(v -> paintView.undo());
         findViewById(R.id.paint_clear).setOnClickListener(v ->

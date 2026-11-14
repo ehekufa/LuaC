@@ -36,6 +36,7 @@ final class ProjectAdapter extends RecyclerView.Adapter<ProjectAdapter.Holder> {
 
     @Override public Holder onCreateViewHolder(ViewGroup parent, int viewType) {
         View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_project, parent, false);
+        StudioTheme.apply(view, StudioTheme.color(parent.getContext()));
         return new Holder(view);
     }
 

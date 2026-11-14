@@ -36,6 +36,11 @@ struct LiModule {
     LiModule *next;
 };
 typedef struct {
+    char *text;
+    int kind, line;
+    double x, y, w, h, color[4];
+} LiDrawCommand;
+typedef struct {
     LcContext *ctx;
     LiFunction *functions;
     LiModule *modules;
@@ -44,6 +49,11 @@ typedef struct {
     char *previous_cwd;
     size_t output_offset;
     long budget;
+    LiDrawCommand *draw_commands;
+    int draw_count, draw_capacity, love_draw_active, love_enabled;
+    double draw_color[4], background[4];
+    unsigned char touch_down[32];
+    double touch_x[32], touch_y[32];
 } LiSession;
 typedef struct {
     LiSession *session;
@@ -645,6 +655,8 @@ static double li_number_field(LcContext *ctx, LcValue table, const char *name, d
     lc_release(ctx,original);
     return number;
 }
+#include "luac_love.h"
+
 static void li_json_scene(LiSession *session, Str *json) {
     LcContext *ctx = session->ctx;
     LcValue world = li_global(session,"world"), entities, camera, overlay;
@@ -726,6 +738,7 @@ static char *li_project_frame(LiSession *session, double dt) {
             lc_release(ctx,world);lc_release(ctx,engine);
         }
     }
+    if (!ctx->error) li_love_frame(session, dt);
     sb_init(&json);sb_add(&json,"{\"ok\":");sb_add(&json,ctx->error?"false":"true");
     sb_add(&json,",\"output\":");
     if (ctx->captured_output && session->output_offset < ctx->captured_length)
@@ -735,7 +748,7 @@ static char *li_project_frame(LiSession *session, double dt) {
     sb_add(&json,",\"error\":");
     if (ctx->error) { Str message;sb_init(&message);sb_printf(&message,"%s:%d: %s",ctx->source?ctx->source:"project",ctx->line,ctx->message);li_json_string(&json,message.data);sb_free(&message); }
     else sb_add(&json,"null");
-    li_json_scene(session,&json);sb_add(&json,"}");
+    li_json_scene(session,&json);li_love_json(session, &json);sb_add(&json,"}");
     return json.data;
 }
 
@@ -756,6 +769,7 @@ LUAC_API void *luac_project_open(const char *root_path, char **error_message) {
         free(session->previous_cwd);free(session->root_path);free(session);return NULL;
     }
     session->ctx = lc_context_new(session->root_path); session->ctx->capture_output = 1;
+    li_love_init(session);
     session->root = li_env_new(NULL); session->budget = 1000000; li_current = session;
     require = lc_function_new(session->ctx,li_require,0,NULL,"project require");
     li_set_global(session,"require",require);
@@ -769,6 +783,7 @@ LUAC_API void *luac_project_open(const char *root_path, char **error_message) {
     main_module = li_parse_module(session,"main",1);
     if (main_module && !session->ctx->error) {
         LcValue ignored = li_execute_module(session,main_module);lc_release(session->ctx,ignored);
+        if (!session->ctx->error) li_love_call(session, "load", 0, NULL);
     }
     return session;
 }
@@ -781,7 +796,9 @@ LUAC_API void luac_project_touch(void *handle, int id, double x, double y, int d
     LiSession *session = (LiSession *)handle;
     LcValue world,engine,method,args[5],ignored;
     if (!session || session->ctx->error) return;
-    li_current = session; world=li_global(session,"world");engine=li_global(session,"engine");
+    li_current = session;
+    li_love_touch(session, id, x, y, down);
+    world=li_global(session,"world");engine=li_global(session,"engine");
     if(world.type==LC_TABLE&&engine.type==LC_TABLE){method=li_field(session->ctx,engine,"inject_touch");if(method.type==LC_FUNCTION){args[0]=world;args[1]=lc_integer(id);args[2]=lc_number(x);args[3]=lc_number(y);args[4]=lc_bool(down);ignored=lc_call(session->ctx,method,5,args);lc_release(session->ctx,ignored);}lc_release(session->ctx,method);}
     lc_release(session->ctx,world);lc_release(session->ctx,engine);
 }
@@ -794,6 +811,8 @@ LUAC_API void luac_project_close(void *handle) {
     for(function=session->functions;function;function=next_function){next_function=function->next;li_env_release(session->ctx,function->closure);free(function);}
     li_env_release(session->ctx,session->root);
     for(module=session->modules;module;module=next_module){next_module=module->next;token_clear(&module->parser.token);free_stmt(module->program);free(module->chunk);free(module->source);free(module->name);free(module);}
+    li_love_clear(session);
+    free(session->draw_commands);
     lc_context_destroy(session->ctx);
     if(session->previous_cwd)chdir(session->previous_cwd);
     free(session->previous_cwd);free(session->root_path);free(session);li_current=NULL;

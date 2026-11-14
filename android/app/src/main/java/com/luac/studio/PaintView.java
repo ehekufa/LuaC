@@ -38,6 +38,7 @@ final class PaintView extends View {
         brush.setStrokeWidth(8);
     }
 
+    int getBrushColor() { return color; }
     void setBrushColor(int color) { this.color = color; eraser = false; updateBrush(); }
     void setEraser() { eraser = true; updateBrush(); }
     void setBrushSize(float size) { brush.setStrokeWidth(size); }

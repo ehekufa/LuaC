@@ -1,5 +1,6 @@
 #include "vulkan.hpp"
 #include "nuklear_canvas.hpp"
+#include "color_wheel.hpp"
 #include "engine.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -34,6 +35,8 @@ struct App {
     std::deque<nk_user_font> overlayFonts;
     bool russian = false;
     bool settingsOpen = false;
+    ColorWheel themeWheel;
+    bool themeDirty = false;
     const char *tr(const char *en, const char *ru) const { return russian ? ru : en; }
     std::vector<nk_byte> uiMemory;
     std::vector<char> sourceStorage;
@@ -109,6 +112,46 @@ struct App {
         const char *value = glfwGetClipboardString(window);
         if (value) nk_textedit_paste(edit, value, static_cast<int>(std::strlen(value)));
     }
+    std::string settingsPath() const {
+#ifdef _WIN32
+        const char *home = std::getenv("APPDATA");
+#else
+        const char *home = std::getenv("HOME");
+#endif
+        return home && *home ? std::string(home) + "/.luac-studio.conf" : std::string();
+    }
+    void loadTheme() {
+        std::ifstream file(settingsPath());
+        unsigned r, g, b;
+        if (file >> r >> g >> b && r <= 255 && g <= 255 && b <= 255)
+            themeWheel.setColor(nk_rgb(r, g, b));
+    }
+    void saveTheme() {
+        if (!themeDirty) return;
+        std::string path = settingsPath();
+        if (path.empty()) return;
+        std::ofstream file(path, std::ios::trunc);
+        nk_color c = themeWheel.color();
+        if (file << static_cast<unsigned>(c.r) << ' ' << static_cast<unsigned>(c.g) << ' ' << static_cast<unsigned>(c.b) << '\n')
+            themeDirty = false;
+    }
+    void applyTheme() {
+        nk_color accent = themeWheel.color();
+        float h, s, v;
+        nk_color_hsv_f(&h, &s, &v, accent);
+        nk_color dark = nk_hsv_f(h, s, std::min(v, 0.36f));
+        nk_color hover = nk_hsv_f(h, s, std::min(v, 0.26f));
+        ui.style.button.hover = nk_style_item_color(hover);
+        ui.style.button.active = nk_style_item_color(dark);
+        ui.style.option.cursor_normal = ui.style.option.cursor_hover = nk_style_item_color(accent);
+        ui.style.checkbox.cursor_normal = ui.style.checkbox.cursor_hover = nk_style_item_color(accent);
+        ui.style.selectable.normal_active = ui.style.selectable.hover_active = ui.style.selectable.pressed_active = nk_style_item_color(dark);
+        ui.style.slider.cursor_normal = ui.style.slider.cursor_hover = ui.style.slider.cursor_active = nk_style_item_color(accent);
+        ui.style.slider.bar_filled = accent;
+        ui.style.edit.cursor_normal = ui.style.edit.cursor_hover = dark;
+        ui.style.scrollv.cursor_active = nk_style_item_color(accent);
+        ui.style.scrollh.cursor_active = nk_style_item_color(accent);
+    }
     void initializeUi() {
         uiMemory.resize(nuklearArenaSize);
         sourceStorage.resize(sourceCapacity);
@@ -170,6 +213,8 @@ struct App {
         ui.style.edit.text_hover = nk_rgb(255, 255, 255);
         ui.style.edit.text_active = nk_rgb(255, 255, 255);
         ui.style.window.scrollbar_size = nk_vec2(10, 10);
+        loadTheme();
+        applyTheme();
         setOutput("Ready. F5 - run, F6 - syntax check, F7 - Editor/Engine, Ctrl+S - save.\nNuklear immediate UI / fixed 4 MiB arena / Vulkan renderer.");
         initializeEngine();
     }
@@ -460,7 +505,7 @@ struct App {
     }
     void settings() {
         if (!settingsOpen) return;
-        if (nk_begin(&ui, "Settings panel", nk_rect(std::max(8, width - 300), 66, 280, 160), NK_WINDOW_BORDER)) {
+        if (nk_begin(&ui, "Settings panel", nk_rect(std::max(8, width - 300), 66, 280, 460), NK_WINDOW_BORDER)) {
             nk_layout_row_dynamic(&ui, 25, 1);
             nk_label(&ui, tr("Settings", "Настройки"), NK_TEXT_LEFT);
             nk_label(&ui, tr("Language", "Язык"), NK_TEXT_LEFT);
@@ -473,8 +518,21 @@ struct App {
                 russian = true;
                 if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "language=ru\n");
             }
+            nk_layout_row_dynamic(&ui, 22, 1);
+            nk_label(&ui, tr("Accent color", "Цвет темы"), NK_TEXT_LEFT);
+            nk_layout_row_dynamic(&ui, 245, 1);
+            if (themeWheel.draw(&ui)) {
+                themeDirty = true;
+                applyTheme();
+                if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "theme=changed\n");
+            }
+            nk_layout_row_dynamic(&ui, 24, 1);
+            struct nk_rect swatch = nk_widget_bounds(&ui);
+            nk_label(&ui, tr("Preview", "Образец"), NK_TEXT_LEFT);
+            nk_fill_rect(nk_window_get_canvas(&ui), nk_rect(swatch.x + swatch.w - 60, swatch.y + 2, 54, 20), 4, themeWheel.color());
             nk_layout_row_dynamic(&ui, 26, 1);
-            if (nk_button_label(&ui, tr("Close", "Закрыть"))) settingsOpen = false;
+            if (nk_button_label(&ui, tr("Close", "Закрыть"))) { saveTheme(); settingsOpen = false; }
+            if (themeDirty && !ui.input.mouse.buttons[NK_BUTTON_LEFT].down) saveTheme();
         }
         nk_end(&ui);
     }
@@ -620,10 +678,12 @@ int main(int argc, char **argv) {
             if (application.width > 0 && application.height > 0) application.draw();
             else { nk_clear(&application.ui); glfwWaitEvents(); }
         }
+        application.saveTheme();
         nk_free(&application.ui);
         application.renderer.shutdown();
     } catch (const std::exception &error) {
         std::cerr << "LuaC Studio: " << error.what() << '\n';
+        application.saveTheme();
         nk_free(&application.ui);
         application.renderer.shutdown();
         glfwDestroyWindow(window); glfwTerminate(); return 1;

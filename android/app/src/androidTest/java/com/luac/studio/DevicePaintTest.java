@@ -42,6 +42,46 @@ public class DevicePaintTest {
             } catch (Exception e) { throw new AssertionError(e); }
         });
     }
+    @Test public void colorWheelChangesBrushAndSavedTheme() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            try {
+                FrameLayout parent = new FrameLayout(context);
+                ColorWheelView wheel = new ColorWheelView(context, Color.BLUE);
+                parent.addView(wheel, new FrameLayout.LayoutParams(260, 260));
+                int spec = android.view.View.MeasureSpec.makeMeasureSpec(260, android.view.View.MeasureSpec.EXACTLY);
+                parent.measure(spec, spec); parent.layout(0, 0, 260, 260);
+                Bitmap screen = Bitmap.createBitmap(260, 260, Bitmap.Config.ARGB_8888);
+                parent.draw(new Canvas(screen));
+                touch(wheel, 235, 130);  // Hue ring: red.
+                touch(wheel, 180, 80);   // Saturation and brightness.
+                int chosen = wheel.getColor();
+                assertTrue(Color.red(chosen) > 180);
+                assertTrue(Color.red(chosen) > Color.blue(chosen) * 2);
+                int before = StudioTheme.color(context);
+                try {
+                    StudioTheme.save(context, chosen);
+                    assertEquals(chosen, StudioTheme.color(context));
+                    assertTrue(Color.red(StudioTheme.dark(Color.WHITE)) <= 90);
+                } finally { StudioTheme.save(context, before); }
+                PaintView view = new PaintView(context);
+                FrameLayout paintParent = new FrameLayout(context);
+                paintParent.addView(view, new FrameLayout.LayoutParams(512, 512));
+                int paintSpec = android.view.View.MeasureSpec.makeMeasureSpec(512, android.view.View.MeasureSpec.EXACTLY);
+                paintParent.measure(paintSpec, paintSpec); paintParent.layout(0, 0, 512, 512);
+                paintParent.draw(new Canvas(Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)));
+                view.setBrushColor(chosen); stroke(view);
+                assertEquals(chosen, pixel(view));
+                screen.recycle();
+            } catch (Exception e) { throw new AssertionError(e); }
+        });
+    }
+    private static void touch(android.view.View view, float x, float y) {
+        long time = android.os.SystemClock.uptimeMillis();
+        MotionEvent down = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, x, y, 0);
+        MotionEvent up = MotionEvent.obtain(time, time + 1, MotionEvent.ACTION_UP, x, y, 0);
+        view.dispatchTouchEvent(down); view.dispatchTouchEvent(up); down.recycle(); up.recycle();
+    }
     private static void stroke(PaintView view) {
         long time = android.os.SystemClock.uptimeMillis();
         MotionEvent down = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 256, 256, 0);

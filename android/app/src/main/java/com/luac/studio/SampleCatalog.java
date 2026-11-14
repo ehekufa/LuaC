@@ -18,6 +18,7 @@ final class SampleCatalog {
         new Sample("hello", "Hello, modules", "A main file and a project module", "greeting.lua"),
         new Sample("library", "Built-in libraries", "JSON, SHA-256 and Base64", "data.lua"),
         new Sample("gui", "luac_gui • touch", "A small Canvas scene wrapper, not Vulkan", "luac_gui.lua"),
+        new Sample("love", "LÖVE-style drawing", "Draw and touch callbacks on Canvas", "scene.lua"),
         new Sample("ffi", "Native FFI", "C library calls; requires a compatible libffi", "native.lua")
     };
     private SampleCatalog() { }

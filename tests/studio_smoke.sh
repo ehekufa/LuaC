@@ -18,7 +18,7 @@ report_failure() {
 trap 'report_failure "$LINENO"' ERR
 printf 'original' > "$work/source.lua"
 printf '%s' 'Привет, Україна, Беларусь, қазақша — café' > "$work/expected"
-LUAC_UI_TRACE=1 ./build/luac-gui "$work/source.lua" > "$work/studio.log" 2>&1 &
+HOME="$work" LUAC_UI_TRACE=1 ./build/luac-gui "$work/source.lua" > "$work/studio.log" 2>&1 &
 pid=$!
 window=$(timeout 20s xdotool search --sync --onlyvisible --name 'LuaC Studio' | head -1)
 xdotool windowfocus --sync "$window"
@@ -35,9 +35,13 @@ click_at 925 36
 sleep 0.5
 click_at 1172 145
 sleep 0.5
-click_at 1115 183
+click_at 1225 332
+sleep 0.5
+grep -q 'theme=changed' "$work/studio.log"
+click_at 1115 507
 sleep 0.5
 grep -q 'language=ru' "$work/studio.log"
+test -s "$work/.luac-studio.conf"
 xclip -selection clipboard -i "$work/expected"
 click_at 80 130
 xdotool key --clearmodifiers ctrl+a
