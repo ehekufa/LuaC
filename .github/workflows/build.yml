@@ -172,6 +172,14 @@ jobs:
           cp -r /ucrt64/include/mbedtls /ucrt64/include/psa dist/windows/tcc/include/
           # The diagnostic attribute requires GCC or Clang, not TinyCC.
           sed -i '/^#define MBEDTLS_DEPRECATED_WARNING$/c\#if !defined(__TINYC__)\n#define MBEDTLS_DEPRECATED_WARNING\n#endif' dist/windows/tcc/include/mbedtls/mbedtls_config.h
+          # Match the winpthreads mutex layout without exposing GCC-only headers to TinyCC.
+          cp src/third_party/tcc_compat/mbedtls_mutex.h dist/windows/tcc/include/luac_mbedtls_mutex.h
+          sed -i '/^#include <pthread.h>$/c\#if defined(__TINYC__)\n#include <luac_mbedtls_mutex.h>\n#else\n#include <pthread.h>\n#endif' dist/windows/tcc/include/mbedtls/threading.h
+          gcc tests/tcc_mbedtls_abi.c -o build/mbedtls-abi-gcc.exe
+          dist/windows/tcc/tcc.exe tests/tcc_mbedtls_abi.c -o build/mbedtls-abi-tcc.exe
+          build/mbedtls-abi-gcc.exe > build/mbedtls-abi-gcc.txt
+          build/mbedtls-abi-tcc.exe > build/mbedtls-abi-tcc.txt
+          diff -u build/mbedtls-abi-gcc.txt build/mbedtls-abi-tcc.txt
           for lib in mbedtls mbedx509 mbedcrypto; do
             set -- /ucrt64/bin/lib${lib}*.dll
             [ "$#" -eq 1 ] && [ -f "$1" ]
@@ -183,7 +191,7 @@ jobs:
           mkdir -p dist/windows
           cp luac.exe build/libluac.a build/libluac.dll src/luac.h src/runtime.h src/luac_interpreter.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/engine.hpp README.md LICENSE dist/windows/
           cp -r src/third_party examples dist/windows/
-          cp /ucrt64/bin/libmbed*.dll dist/windows/
+          cp /ucrt64/bin/libmbed*.dll /ucrt64/bin/libwinpthread-1.dll dist/windows/
           7z a -tzip dist/LuaC-windows-x86_64.zip ./dist/windows/*
       - name: Test relocated Windows package without GCC on PATH
         shell: msys2 {0}
