@@ -128,6 +128,18 @@ int main() {
     nk_input_begin(&ui); nk_input_key(&ui, NK_KEY_COPY, nk_false); nk_input_key(&ui, NK_KEY_BACKSPACE, nk_true); nk_input_end(&ui);
     frame(ui, canvas, clicked, source, sourceLength, buttonBounds);
     assert(std::string(source, sourceLength) == clipboard.substr(0, clipboard.size() - std::strlen("é")));
+    const std::string beforeInsert(source, sourceLength);
+    nk_input_begin(&ui); nk_input_key(&ui, NK_KEY_BACKSPACE, nk_false);
+    nk_input_key(&ui, NK_KEY_TEXT_START, nk_true); nk_input_end(&ui);
+    frame(ui, canvas, clicked, source, sourceLength, buttonBounds);
+    nk_input_begin(&ui); nk_input_key(&ui, NK_KEY_TEXT_START, nk_false);
+    nk_input_key(&ui, NK_KEY_RIGHT, nk_true); nk_input_end(&ui);
+    frame(ui, canvas, clicked, source, sourceLength, buttonBounds);
+    clipboard = "漢字"; /* Unsupported glyphs remain intact in the file. */
+    nk_input_begin(&ui); nk_input_key(&ui, NK_KEY_RIGHT, nk_false);
+    nk_input_key(&ui, NK_KEY_PASTE, nk_true); nk_input_end(&ui);
+    frame(ui, canvas, clicked, source, sourceLength, buttonBounds);
+    assert(std::string(source, sourceLength) == beforeInsert.substr(0, std::strlen("П")) + clipboard + beforeInsert.substr(std::strlen("П")));
     assert(ui.memory.allocated <= arena.size());
     const nk_font *atlas = canvas.atlas().bakedFont();
     for (nk_rune cp : {0x041fu, 0x044fu, 0x0457u, 0x045eu, 0x049bu, 0x04d9u, 0x052fu, 0x00e9u, 0x2026u}) {
