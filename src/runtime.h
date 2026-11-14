@@ -41,6 +41,23 @@
 #include <windows.h>
 #include <direct.h>
 #include <io.h>
+#if defined(__TINYC__)
+/* TinyCC's compact Windows SDK omits these MinGW convenience wrappers. */
+_CRTIMP int __cdecl _gmtime64_s(struct tm *, const long long *);
+_CRTIMP int __cdecl _localtime64_s(struct tm *, const long long *);
+#define gmtime_s(out, stamp) _gmtime64_s((out), (const long long *)(stamp))
+#define localtime_s(out, stamp) _localtime64_s((out), (const long long *)(stamp))
+static int lc_tcc_is_thread_a_fiber(void) {
+    typedef BOOL (WINAPI *LcIsFiber)(void);
+    LcIsFiber fn = (LcIsFiber)GetProcAddress(GetModuleHandleA("kernel32.dll"), "IsThreadAFiber");
+    return fn ? fn() : 0;
+}
+#define IsThreadAFiber lc_tcc_is_thread_a_fiber
+/* Windows does not export gai_strerrorA from ws2_32 on all toolchains. */
+static const char *lc_tcc_gai_error(int code) { (void)code; return "Windows address lookup failed"; }
+#undef gai_strerror
+#define gai_strerror lc_tcc_gai_error
+#endif
 #define LC_INVALID_SOCKET INVALID_SOCKET
 #else
 #include <unistd.h>
@@ -1053,7 +1070,7 @@ static LcValue lc_coroutine_resume_value(LcContext *ctx, LcCoroutine *co, int ar
     }
 #else
     lc_windows_coroutine_context = ctx;
-    if (!IsThreadAFiber() && !ConvertThreadToFiber(NULL)) { ctx->active_coroutine = parent; out = lc_string(ctx, "cannot convert thread to a fiber"); return lc_coroutine_pack(ctx, 0, out); }
+    if (!IsThreadAFiber() && !ConvertThreadToFiber(NULL) && GetLastError() != ERROR_ALREADY_FIBER) { ctx->active_coroutine = parent; out = lc_string(ctx, "cannot convert thread to a fiber"); return lc_coroutine_pack(ctx, 0, out); }
     co->caller_fiber = GetCurrentFiber();
     if (!co->caller_fiber) { ctx->active_coroutine = parent; out = lc_string(ctx, "coroutine resume requires a fiber thread"); return lc_coroutine_pack(ctx, 0, out); }
     SwitchToFiber(co->fiber);

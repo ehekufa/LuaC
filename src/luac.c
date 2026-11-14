@@ -891,6 +891,17 @@ static void dispose_disk_modules(ModuleBuild *build) {
     free(build->items);
 }
 
+/* C string literals must escape Windows backslashes and non-ASCII path bytes. */
+static void cg_c_literal_content(Str *out, const char *text) {
+    const unsigned char *p = (const unsigned char *)text;
+    while (*p) {
+        if (*p == '\\' || *p == '"') sb_printf(out, "\\%c", *p);
+        else if (*p < 32 || *p > 126) sb_printf(out, "\\%03o", *p);
+        else sb_n(out, (const char *)p, 1);
+        ++p;
+    }
+}
+
 static char *generate_c(Parser*p,Stmt*program,const char*source){
     Cg cg;Cf root;Expr mainexpr;char*entry;Str out;ModuleBuild modules;int i;
     memset(&cg,0,sizeof(cg));cg.parser=p;sb_init(&cg.functions);memset(&modules,0,sizeof(modules));modules.cg=&cg;modules.root_file=source;
@@ -905,7 +916,7 @@ static char *generate_c(Parser*p,Stmt*program,const char*source){
     sb_add(&out,"int lc_program_main(LcContext *ctx) {\n    LcValue r;\n");
     for(i=0;i<modules.count;++i){int j;sb_printf(&out,"    lc_preload_native(ctx, \"");
         for(j=0;modules.items[i].name[j];++j){char c=modules.items[i].name[j];if(c=='\\'||c=='\"')sb_printf(&out,"\\%c",c);else sb_n(&out,&c,1);}sb_printf(&out,"\", lc_disk_module_%d);\n",modules.items[i].id);}
-    sb_add(&out,"    r = lc_user_main(ctx, NULL, 0, NULL);\n    lc_release(ctx, r);\n    return lc_report_error(ctx);\n}\n\n#if defined(_WIN32)\n__declspec(dllexport)\n#else\n__attribute__((visibility(\"default\")))\n#endif\nint lc_jit_main(void) {\n    LcContext *ctx = lc_context_new(\"");sb_add(&out,source);sb_add(&out,"\");\n    int status;\n    if (!ctx) return 1;\n    status = lc_program_main(ctx);\n    lc_context_destroy(ctx);\n    return status;\n}\n\n#ifdef LUAC_STANDALONE\nint main(void) { return lc_jit_main(); }\n#endif\n");}
+    sb_add(&out,"    r = lc_user_main(ctx, NULL, 0, NULL);\n    lc_release(ctx, r);\n    return lc_report_error(ctx);\n}\n\n#if defined(_WIN32)\n__declspec(dllexport)\n#else\n__attribute__((visibility(\"default\")))\n#endif\nint lc_jit_main(void) {\n    LcContext *ctx = lc_context_new(\"");cg_c_literal_content(&out,source);sb_add(&out,"\");\n    int status;\n    if (!ctx) return 1;\n    status = lc_program_main(ctx);\n    lc_context_destroy(ctx);\n    return status;\n}\n\n#ifdef LUAC_STANDALONE\nint main(void) { return lc_jit_main(); }\n#endif\n");}
     entry=out.data;cf_dispose(&root);sb_free(&cg.functions);dispose_disk_modules(&modules);(void)entry;
     if(cg.failed){sb_free(&out);return NULL;}
     return out.data;
@@ -1030,8 +1041,28 @@ static void usage(void){puts("LuaC "LUAC_VERSION" — Lua-syntax native compiler
 
 int main(int argc,char**argv){
     const char*input=NULL,*output=NULL,*keep=NULL,*cc=getenv("CC");Str extra_cflags,extra_ldflags;sb_init(&extra_cflags);sb_init(&extra_ldflags);sb_add(&extra_cflags,LUAC_DEFAULT_CFLAGS);sb_add(&extra_ldflags,LUAC_DEFAULT_LDFLAGS);{const char*flags=getenv("LUAC_CFLAGS");if(flags){sb_add(&extra_cflags," ");sb_add(&extra_cflags,flags);}flags=getenv("LUAC_LDFLAGS");if(flags){sb_add(&extra_ldflags," ");sb_add(&extra_ldflags,flags);}}enum{MODE_JIT,MODE_CHECK,MODE_C,MODE_AOT}mode=MODE_JIT;int i,status=1;size_t length;char*source,*generated;Parser p;Stmt*program;
+#ifdef _WIN32
+    {
+        static char executable[MAX_PATH], bundled[MAX_PATH];
+        DWORD n = GetModuleFileNameA(NULL, executable, sizeof(executable));
+        char *slash;
+        if (n && n < sizeof(executable)) {
+            luac_executable_path = executable;
+            snprintf(bundled, sizeof(bundled), "%s", executable);
+            slash = strrchr(bundled, '\\');
+            if (!slash) slash = strrchr(bundled, '/');
+            if (slash && (size_t)(slash - bundled) + sizeof("\\tcc\\tcc.exe") < sizeof(bundled)) {
+                strcpy(slash, "\\tcc\\tcc.exe");
+                if ((!cc || !*cc) && access(bundled, R_OK) == 0) cc = bundled;
+            }
+        }
+        if (!luac_executable_path) luac_executable_path = argc > 0 ? argv[0] : NULL;
+        if (!cc || !*cc) cc = "gcc";
+    }
+#else
     if(!cc||!*cc)cc="cc";
     luac_executable_path = argc > 0 ? argv[0] : NULL;
+#endif
     for(i=1;i<argc;++i){if(!strcmp(argv[i],"--check"))mode=MODE_CHECK;else if(!strcmp(argv[i],"--emit-c"))mode=MODE_C;else if(!strcmp(argv[i],"--aot"))mode=MODE_AOT;else if(!strcmp(argv[i],"--jit"))mode=MODE_JIT;else if(!strcmp(argv[i],"-o")&&i+1<argc)output=argv[++i];else if(!strcmp(argv[i],"--keep-c")&&i+1<argc)keep=argv[++i];else if(!strcmp(argv[i],"--cc")&&i+1<argc)cc=argv[++i];else if(!strcmp(argv[i],"--cflags")&&i+1<argc){sb_add(&extra_cflags," ");sb_add(&extra_cflags,argv[++i]);}else if(!strcmp(argv[i],"--ldflags")&&i+1<argc){sb_add(&extra_ldflags," ");sb_add(&extra_ldflags,argv[++i]);}else if(!strcmp(argv[i],"--version")){puts("LuaC "LUAC_VERSION);return 0;}else if(!strcmp(argv[i],"--help")||!strcmp(argv[i],"-h")){usage();return 0;}else if(argv[i][0]=='-'){fprintf(stderr,"luac: unknown option %s\n",argv[i]);return 2;}else if(!input)input=argv[i];else{fprintf(stderr,"luac: too many input files\n");return 2;}}
     if(!input){usage();return 2;}source=read_file(input,&length);if(!source)return 1;
     memset(&p,0,sizeof(p));p.source=source;p.filename=input;p.length=length;p.line=1;p.column=1;next_token(&p);program=parse_block(&p);if(p.token.kind!=T_EOF)parse_error(&p,"unexpected '%s'",token_name(p.token.kind));verify_program(&p,program);
@@ -1039,7 +1070,7 @@ int main(int argc,char**argv){
     if(mode==MODE_CHECK){printf("%s: syntax OK\n",input);token_clear(&p.token);free_stmt(program);free(source);return 0;}
     generated=generate_c(&p,program,input);
     if(!generated){status=1;goto done;}
-    if(mode==MODE_C){const char*out=output?output:"a.luac.c";if(!write_file(out,generated,strlen(generated))){fprintf(stderr,"luac: cannot write %s\n",out);goto done;}printf("generated %s\n",out);status=0;goto done;}
+    if(mode==MODE_C){const char*out=output?output:"a.luac.c";Str standalone;sb_init(&standalone);sb_add(&standalone,"#ifndef LUAC_STANDALONE\n#define LUAC_STANDALONE 1\n#endif\n");sb_add(&standalone,generated);free(generated);generated=standalone.data;if(!write_file(out,generated,strlen(generated))){fprintf(stderr,"luac: cannot write %s\n",out);goto done;}printf("generated %s\n",out);status=0;goto done;}
     {
 #ifdef _WIN32
      char tmp[MAX_PATH];const char*temp_dir=getenv("TEMP");if(!temp_dir)temp_dir=".";snprintf(tmp,sizeof(tmp),"%s/luac-XXXXXX",temp_dir);
@@ -1079,10 +1110,18 @@ int main(int argc,char**argv){
           FILE*file;lresponse=xmalloc(response_length);snprintf(lresponse,response_length,"%s.link.rsp",cfile);
           file=fopen(lresponse,"wb");if(!file||fwrite(extra_ldflags.data,1,extra_ldflags.len,file)!=extra_ldflags.len){if(file)fclose(file);fprintf(stderr,"luac: cannot write linker response file\n");if(cresponse){unlink(cresponse);free(cresponse);free(cresponse_arg);}free(lresponse);free(cfile);free(qcc);free(qc);sb_free(&cmd);goto done;}fclose(file);
           lresponse_arg=xmalloc(response_length+1);snprintf(lresponse_arg,response_length+1,"@%s",lresponse);}
-      if(mode==MODE_AOT)cr=(int)_spawnvp(_P_WAIT,cc,(const char *const[]){
-          cc,"-std=gnu99","-O2","-DLUAC_STANDALONE",cresponse_arg,cfile,"-o",output,"-lm","-lws2_32",lresponse_arg,NULL});
-      else cr=(int)_spawnvp(_P_WAIT,cc,(const char *const[]){
-          cc,"-std=gnu99","-O2","-fPIC","-shared",cresponse_arg,cfile,"-o",sofile,"-lm","-lws2_32",lresponse_arg,NULL});
+      { const char *args[16]; int n=0;
+        args[n++]=cc; args[n++]="-std=gnu99"; args[n++]="-O2";
+        if(mode==MODE_AOT) args[n++]="-DLUAC_STANDALONE";
+        else { args[n++]="-fPIC"; args[n++]="-shared"; }
+        if(cresponse_arg) args[n++]=cresponse_arg;
+        args[n++]=cfile; args[n++]="-o"; args[n++]=mode==MODE_AOT?output:sofile;
+        args[n++]="-lm"; args[n++]="-lws2_32";
+        if(lresponse_arg) args[n++]=lresponse_arg;
+        args[n]=NULL;
+        cr=(int)_spawnvp(_P_WAIT,cc,args);
+        if(cr==-1) fprintf(stderr,"luac: cannot start C compiler '%s': %s (use --cc to select one)\n",cc,strerror(errno));
+      }
       if(cresponse){unlink(cresponse);free(cresponse);free(cresponse_arg);}
       if(lresponse){unlink(lresponse);free(lresponse);free(lresponse_arg);}}
 #else

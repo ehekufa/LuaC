@@ -17,7 +17,11 @@
 #include <mbedtls/x509_crt.h>
 #include <mbedtls/pk.h>
 #ifdef _WIN32
+#if defined(__TINYC__)
+#include "third_party/tcc_compat/wincrypt.h"
+#else
 #include <wincrypt.h>
+#endif
 #endif
 
 typedef struct {

@@ -1,5 +1,9 @@
 #ifndef LUAC_GAME_H
 #define LUAC_GAME_H
+#if defined(__TINYC__) && !defined(STBI_NO_SIMD)
+/* TinyCC does not ship SSE intrinsic headers used by stb_image. */
+#define STBI_NO_SIMD
+#endif
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
 #define STBI_NO_HDR

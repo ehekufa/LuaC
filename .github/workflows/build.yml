@@ -22,6 +22,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libmbedtls-dev
       - name: Build and test
         run: make -j2 && SANITIZE=1 make test
+      - name: TinyCC compatibility
+        run: |
+          mkdir -p /tmp/tinycc-src
+          curl -fL https://codeload.github.com/tinycc/tinycc/tar.gz/f830a1697e159056b75de40a60464bc43ee670a3 -o /tmp/tinycc.tar.gz
+          tar -xzf /tmp/tinycc.tar.gz -C /tmp/tinycc-src --strip-components=1
+          (cd /tmp/tinycc-src && ./configure --prefix=/tmp/tinycc-install && make -j2 && make install)
+          TCC=/tmp/tinycc-install/bin/tcc ./tests/test_tinycc.sh
       - name: CMake package and consumer test
         run: |
           set +e
@@ -137,6 +144,28 @@ jobs:
             printf '::error file=tests/libraries.lua::%s\n' "$message"
             exit "$status"
           fi
+      - name: Build bundled TinyCC
+        shell: msys2 {0}
+        run: |
+          set -eu
+          mkdir -p build/tinycc dist/windows/tcc
+          curl -fL https://codeload.github.com/tinycc/tinycc/tar.gz/f830a1697e159056b75de40a60464bc43ee670a3 -o build/tinycc-source.tar.gz
+          tar -xzf build/tinycc-source.tar.gz -C build/tinycc --strip-components=1
+          cd build/tinycc
+          ./configure --prefix="$(cd ../../dist/windows/tcc && pwd)" --cc=gcc
+          make -j2
+          make install
+          cd ../..
+          cp build/tinycc/COPYING dist/windows/tcc/COPYING
+          cp build/tinycc-source.tar.gz dist/windows/tcc/tinycc-source.tar.gz
+          cp src/third_party/tcc_compat/strings.h dist/windows/tcc/include/
+          cp src/third_party/tcc_compat/crypt32.def dist/windows/tcc/lib/
+          cp -r /ucrt64/include/mbedtls /ucrt64/include/psa dist/windows/tcc/include/
+          for lib in mbedtls mbedx509 mbedcrypto; do
+            set -- /ucrt64/bin/lib${lib}*.dll
+            [ "$#" -eq 1 ] && [ -f "$1" ]
+            dist/windows/tcc/tcc.exe -impdef "$1" -o "dist/windows/tcc/lib/lib${lib}.def"
+          done
       - name: Package
         shell: msys2 {0}
         run: |
@@ -145,6 +174,29 @@ jobs:
           cp -r src/third_party examples dist/windows/
           cp /ucrt64/bin/libmbed*.dll dist/windows/
           7z a -tzip dist/LuaC-windows-x86_64.zip ./dist/windows/*
+      - name: Test relocated Windows package without GCC on PATH
+        shell: msys2 {0}
+        run: |
+          set -eu
+          package="$(pwd)/dist/windows"
+          scratch="$(mktemp -d)/LuaC package with spaces"
+          mkdir -p "$scratch"
+          cp -r "$package" "$scratch/install"
+          cd "$scratch"
+          unset CC
+          export PATH=/usr/bin:/bin
+          printf "a = 1234567\nprint(a)\n" > example.lua
+          LUAC_TRACE=1 "$scratch/install/luac.exe" example.lua > output.txt 2> error.txt || { cat error.txt; exit 1; }
+          grep -F '1234567' output.txt
+          grep -i 'tcc.exe' error.txt
+          "$scratch/install/luac.exe" --aot example.lua -o "$scratch/install/example.exe"
+          "$scratch/install/example.exe" | grep -F 1234567
+          "$scratch/install/luac.exe" "$scratch/install/examples/https.lua"
+          "$scratch/install/luac.exe" "$scratch/install/examples/audio.lua"
+          "$scratch/install/luac.exe" "$scratch/install/examples/demo.lua"
+          "$scratch/install/luac.exe" --emit-c example.lua -o generated.c
+          "$scratch/install/tcc/tcc.exe" generated.c -o "$scratch/install/generated.exe" -lm -lws2_32
+          "$scratch/install/generated.exe" | grep -F 1234567
       - uses: actions/upload-artifact@v4
         with:
           name: LuaC-windows-x86_64

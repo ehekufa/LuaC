@@ -1,0 +1,5 @@
+LIBRARY crypt32.dll
+EXPORTS
+CertOpenSystemStoreA
+CertEnumCertificatesInStore
+CertCloseStore

@@ -105,6 +105,8 @@ install: src/luac.c src/luac.h src/runtime.h src/luac_interpreter.h src/luac_pac
 	install -m644 src/luac_interpreter.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h $(DESTDIR)$(PREFIX)/share/luac/
 	install -d $(DESTDIR)$(PREFIX)/share/luac/third_party
 	install -m644 src/third_party/miniaudio.h src/third_party/miniaudio-LICENSE src/third_party/stb_image.h src/third_party/stb_truetype.h src/third_party/stb-LICENSE $(DESTDIR)$(PREFIX)/share/luac/third_party/
+	install -d $(DESTDIR)$(PREFIX)/share/luac/third_party/tcc_compat
+	install -m644 src/third_party/tcc_compat/* $(DESTDIR)$(PREFIX)/share/luac/third_party/tcc_compat/
 	install -m644 src/luac.h $(DESTDIR)$(PREFIX)/include/luac.h
 	install -m644 src/engine.hpp $(DESTDIR)$(PREFIX)/include/engine.hpp
 	install -m644 $(BUILD)/libluac.a $(DESTDIR)$(PREFIX)/lib/libluac.a
