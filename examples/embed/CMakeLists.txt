@@ -16,6 +16,7 @@ add_custom_command(
     COMMENT "Compiling Lua syntax to independent native C without a VM"
 )
 add_executable(luac-embed-native native_main.c "${GENERATED}")
+target_compile_definitions(luac-embed-native PRIVATE LUAC_NO_MAIN)
 target_link_libraries(luac-embed-native PRIVATE LuaC::runtime)
 
 add_executable(luac-embed-engine engine_main.cpp)

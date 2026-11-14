@@ -1105,7 +1105,7 @@ int main(int argc,char**argv){
     if(mode==MODE_CHECK){printf("%s: syntax OK\n",input);token_clear(&p.token);free_stmt(program);free(source);return 0;}
     generated=generate_c(&p,program,input);
     if(!generated){status=1;goto done;}
-    if(mode==MODE_C){const char*out=output?output:"a.luac.c";Str standalone;sb_init(&standalone);sb_add(&standalone,"#ifndef LUAC_STANDALONE\n#define LUAC_STANDALONE 1\n#endif\n");sb_add(&standalone,generated);free(generated);generated=standalone.data;if(!write_file(out,generated,strlen(generated))){fprintf(stderr,"luac: cannot write %s\n",out);goto done;}printf("generated %s\n",out);status=0;goto done;}
+    if(mode==MODE_C){const char*out=output?output:"a.luac.c";Str standalone;sb_init(&standalone);sb_add(&standalone,"#if !defined(LUAC_STANDALONE) && !defined(LUAC_NO_MAIN)\n#define LUAC_STANDALONE 1\n#endif\n");sb_add(&standalone,generated);free(generated);generated=standalone.data;if(!write_file(out,generated,strlen(generated))){fprintf(stderr,"luac: cannot write %s\n",out);goto done;}printf("generated %s\n",out);status=0;goto done;}
     {
 #ifdef _WIN32
      char tmp[MAX_PATH];const char*temp_dir=getenv("TEMP");if(!temp_dir)temp_dir=".";snprintf(tmp,sizeof(tmp),"%s/luac-XXXXXX",temp_dir);
