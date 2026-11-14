@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <deque>
 #include <unordered_map>
 
 #ifdef _WIN32
@@ -29,7 +30,11 @@ struct App {
     VulkanRenderer renderer;
     NuklearCanvas canvas;
     nk_context ui{};
-    nk_user_font font{};
+    nk_user_font *font = nullptr;
+    std::deque<nk_user_font> overlayFonts;
+    bool russian = false;
+    bool settingsOpen = false;
+    const char *tr(const char *en, const char *ru) const { return russian ? ru : en; }
     std::vector<nk_byte> uiMemory;
     std::vector<char> sourceStorage;
     std::vector<char> observedSource;
@@ -108,20 +113,15 @@ struct App {
         sourceStorage.resize(sourceCapacity);
         observedSource.resize(sourceCapacity);
         outputStorage.resize(outputCapacity);
-        std::memset(&font, 0, sizeof(font));
-        font.height = 16.0f;
-        font.userdata = nk_handle_ptr(&canvas);
-        font.width = [](nk_handle handle, float height, const char *text, int length) {
-            return static_cast<NuklearCanvas *>(handle.ptr)->textWidth(height, text, length);
-        };
-        if (!nk_init_fixed(&ui, uiMemory.data(), uiMemory.size(), &font))
+        font = canvas.atlas().font();
+        if (!nk_init_fixed(&ui, uiMemory.data(), uiMemory.size(), font))
             throw std::runtime_error("Nuklear fixed arena initialization failed");
         ui.clip.copy = clipboardCopy;
         ui.clip.paste = clipboardPaste;
         ui.clip.userdata = nk_handle_ptr(window);
 
         nk_color colors[NK_COLOR_COUNT];
-        for (auto &entry : colors) entry = nk_rgb(210, 222, 238);
+        for (auto &entry : colors) entry = nk_rgb(255, 255, 255);
         colors[NK_COLOR_WINDOW] = nk_rgb(16, 22, 34);
         colors[NK_COLOR_HEADER] = nk_rgb(20, 28, 43);
         colors[NK_COLOR_BORDER] = nk_rgb(42, 56, 78);
@@ -156,18 +156,18 @@ struct App {
         ui.style.window.fixed_background = nk_style_item_color(nk_rgb(16, 22, 34));
         ui.style.button.rounding = 6.0f;
         ui.style.button.border = 1.0f;
-        ui.style.button.text_normal = nk_rgb(218, 231, 242);
-        ui.style.button.text_hover = nk_rgb(236, 249, 246);
-        ui.style.button.text_active = nk_rgb(8, 25, 25);
+        ui.style.button.text_normal = nk_rgb(255, 255, 255);
+        ui.style.button.text_hover = nk_rgb(255, 255, 255);
+        ui.style.button.text_active = nk_rgb(255, 255, 255);
         ui.style.edit.rounding = 5.0f;
         ui.style.edit.border = 1.0f;
         ui.style.edit.cursor_normal = nk_rgb(75, 220, 181);
         ui.style.edit.cursor_hover = nk_rgb(98, 236, 198);
-        ui.style.edit.cursor_text_normal = nk_rgb(11, 17, 28);
-        ui.style.edit.cursor_text_hover = nk_rgb(11, 17, 28);
-        ui.style.edit.text_normal = nk_rgb(210, 222, 238);
-        ui.style.edit.text_hover = nk_rgb(225, 235, 246);
-        ui.style.edit.text_active = nk_rgb(225, 235, 246);
+        ui.style.edit.cursor_text_normal = nk_rgb(255, 255, 255);
+        ui.style.edit.cursor_text_hover = nk_rgb(255, 255, 255);
+        ui.style.edit.text_normal = nk_rgb(255, 255, 255);
+        ui.style.edit.text_hover = nk_rgb(255, 255, 255);
+        ui.style.edit.text_active = nk_rgb(255, 255, 255);
         ui.style.window.scrollbar_size = nk_vec2(10, 10);
         setOutput("Ready. F5 - run, F6 - syntax check, F7 - Editor/Engine, Ctrl+S - save.\nNuklear immediate UI / fixed 4 MiB arena / Vulkan renderer.");
         initializeEngine();
@@ -227,34 +227,36 @@ struct App {
     void toolbar() {
         if (nk_begin(&ui, "Toolbar", nk_rect(0, 0, static_cast<float>(width), 64),
                      NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_BACKGROUND)) {
-            nk_layout_row_begin(&ui, NK_STATIC, 38, 9);
+            nk_layout_row_begin(&ui, NK_STATIC, 38, 10);
             nk_layout_row_push(&ui, 112);
-            nk_label_colored(&ui, "LuaC // STUDIO", NK_TEXT_LEFT, nk_rgb(75, 220, 181));
-            nk_layout_row_push(&ui, 66);
-            if (nk_button_label(&ui, "Editor")) engineMode = false;
-            nk_layout_row_push(&ui, 70);
-            if (nk_button_label(&ui, "Engine")) engineMode = true;
-            nk_layout_row_push(&ui, 76);
-            if (!engineMode) { if (nk_button_label(&ui, "Run F5")) run(); }
-            else if (nk_button_label(&ui, world.running() ? "Pause" : "Play")) {
+            nk_label_colored(&ui, "LuaC // STUDIO", NK_TEXT_LEFT, nk_rgb(255, 255, 255));
+            nk_layout_row_push(&ui, 100);
+            if (nk_button_label(&ui, tr("Editor", "Редактор"))) engineMode = false;
+            nk_layout_row_push(&ui, 90);
+            if (nk_button_label(&ui, tr("Engine", "Движок"))) engineMode = true;
+            nk_layout_row_push(&ui, 100);
+            if (!engineMode) { if (nk_button_label(&ui, tr("Run F5", "Пуск F5"))) run(); }
+            else if (nk_button_label(&ui, world.running() ? tr("Pause", "Пауза") : tr("Play", "Играть"))) {
                 if (world.running()) world.pause(); else world.play();
             }
-            nk_layout_row_push(&ui, 62);
+            nk_layout_row_push(&ui, 100);
             if (engineMode) {
-                if (nk_button_label(&ui, "Step")) world.step();
-            } else if (nk_button_label(&ui, "Check")) check();
-            nk_layout_row_push(&ui, 62);
-            if (nk_button_label(&ui, engineMode ? "Add" : "Save")) {
+                if (nk_button_label(&ui, tr("Step", "Шаг"))) world.step();
+            } else if (nk_button_label(&ui, tr("Check", "Проверка"))) check();
+            nk_layout_row_push(&ui, 100);
+            if (nk_button_label(&ui, engineMode ? tr("Add", "Добавить") : tr("Save", "Сохранить"))) {
                 if (engineMode) {
                     auto &entity = world.create("Entity " + std::to_string(world.count() + 1));
                     selectedEntity = entity.id;
                 } else save();
             }
-            nk_layout_row_push(&ui, 62);
-            if (nk_button_label(&ui, engineMode ? "Reset" : "F6")) { if (engineMode) resetEngine(); else check(); }
-            nk_layout_row_push(&ui, 54);
-            if (nk_button_label(&ui, "Save")) save();
-            nk_layout_row_push(&ui, std::max(40.0f, width - 620.0f));
+            nk_layout_row_push(&ui, 100);
+            if (nk_button_label(&ui, engineMode ? tr("Reset", "Сброс") : "F6")) { if (engineMode) resetEngine(); else check(); }
+            nk_layout_row_push(&ui, 100);
+            if (nk_button_label(&ui, tr("Save", "Сохранить"))) save();
+            nk_layout_row_push(&ui, 100);
+            if (nk_button_label(&ui, tr("Settings", "Настройки"))) settingsOpen = !settingsOpen;
+            nk_layout_row_push(&ui, std::max(40.0f, width - 920.0f));
             nk_label(&ui, filename.c_str(), NK_TEXT_RIGHT);
             nk_layout_row_end(&ui);
         }
@@ -263,8 +265,8 @@ struct App {
     void editor(float x, float y, float w, float h) {
         if (nk_begin(&ui, "Source", nk_rect(x, y, w, h), NK_WINDOW_BACKGROUND)) {
             nk_layout_row_dynamic(&ui, 22, 1);
-            nk_label_colored(&ui, dirty ? "SOURCE  /  modified" : "SOURCE", NK_TEXT_LEFT,
-                             nk_rgb(75, 220, 181));
+            nk_label_colored(&ui, dirty ? tr("SOURCE  /  modified", "КОД  /  изменён") : tr("SOURCE", "КОД"), NK_TEXT_LEFT,
+                             nk_rgb(255, 255, 255));
             nk_layout_row_dynamic(&ui, std::max(30.0f, h - 66), 1);
             nk_edit_string(&ui, NK_EDIT_BOX, sourceStorage.data(), &sourceLength,
                            static_cast<int>(sourceStorage.size()), nk_filter_default);
@@ -280,7 +282,7 @@ struct App {
     void output(float x, float y, float w, float h) {
         if (nk_begin(&ui, "Output", nk_rect(x, y, w, h), NK_WINDOW_BACKGROUND)) {
             nk_layout_row_dynamic(&ui, 22, 1);
-            nk_label_colored(&ui, "OUTPUT  /  native compiler", NK_TEXT_LEFT, nk_rgb(75, 220, 181));
+            nk_label_colored(&ui, tr("OUTPUT  /  native compiler", "ВЫВОД  /  компилятор"), NK_TEXT_LEFT, nk_rgb(255, 255, 255));
             nk_layout_row_dynamic(&ui, std::max(30.0f, h - 66), 1);
             nk_edit_string(&ui, NK_EDIT_BOX | NK_EDIT_READ_ONLY, outputStorage.data(), &outputLength,
                            static_cast<int>(outputStorage.size()), nk_filter_default);
@@ -290,7 +292,7 @@ struct App {
     void hierarchy(float x, float y, float w, float h) {
         if (nk_begin(&ui, "Scene", nk_rect(x, y, w, h), NK_WINDOW_BACKGROUND)) {
             nk_layout_row_dynamic(&ui, 22, 1);
-            nk_label_colored(&ui, "SCENE  /  entities", NK_TEXT_LEFT, nk_rgb(75, 220, 181));
+            nk_label_colored(&ui, tr("SCENE  /  entities", "СЦЕНА  /  объекты"), NK_TEXT_LEFT, nk_rgb(255, 255, 255));
             for (auto &entity : world.entities()) {
                 nk_layout_row_dynamic(&ui, 28, 1);
                 nk_bool active = selectedEntity == entity.id;
@@ -298,11 +300,11 @@ struct App {
                 if (nk_selectable_label(&ui, label.c_str(), NK_TEXT_LEFT, &active)) selectedEntity = entity.id;
             }
             nk_layout_row_dynamic(&ui, 30, 2);
-            if (nk_button_label(&ui, "Add")) {
+            if (nk_button_label(&ui, tr("Add", "Добавить"))) {
                 auto &entity = world.create("Entity " + std::to_string(world.count() + 1));
                 selectedEntity = entity.id;
             }
-            if (nk_button_label(&ui, "Duplicate") && selected())
+            if (nk_button_label(&ui, tr("Duplicate", "Копировать")) && selected())
                 selectedEntity = world.duplicate(selectedEntity).id;
         }
         nk_end(&ui);
@@ -311,9 +313,9 @@ struct App {
         if (nk_begin(&ui, "Viewport", nk_rect(x, y, w, h), NK_WINDOW_BACKGROUND | NK_WINDOW_NO_SCROLLBAR)) {
             nk_layout_row_dynamic(&ui, 20, 1);
             char caption[160];
-            std::snprintf(caption, sizeof(caption), "VIEWPORT  |  %zu entities  |  %.3fs  |  60 Hz fixed step",
+            std::snprintf(caption, sizeof(caption), tr("VIEWPORT  |  %zu entities  |  %.3fs  |  60 Hz fixed step", "СЦЕНА  |  объектов: %zu  |  %.3fс  |  шаг 60 Гц"),
                           world.count(), world.time());
-            nk_label_colored(&ui, caption, NK_TEXT_LEFT, nk_rgb(75, 220, 181));
+            nk_label_colored(&ui, caption, NK_TEXT_LEFT, nk_rgb(255, 255, 255));
             nk_layout_space_begin(&ui, NK_STATIC, std::max(30.0f, h - 56), 1);
             struct nk_rect bounds = nk_layout_space_bounds(&ui);
             nk_command_buffer *commands = nk_window_get_canvas(&ui);
@@ -366,13 +368,18 @@ struct App {
                 if (entity.id == selectedEntity) nk_stroke_rect(commands, nk_rect(rectangle.x - 3, rectangle.y - 3,
                     rectangle.w + 6, rectangle.h + 6), 5, 2, nk_rgb(240, 240, 210));
                 nk_draw_text(commands, nk_rect(rectangle.x, rectangle.y + rectangle.h + 4, 140, 18), entity.name.c_str(),
-                             static_cast<int>(entity.name.size()), &font, nk_rgb(0, 0, 0), nk_rgb(205, 220, 235));
+                             static_cast<int>(entity.name.size()), font, nk_rgb(0, 0, 0), nk_rgb(205, 220, 235));
                 if (nk_input_is_mouse_click_in_rect(&ui.input, NK_BUTTON_LEFT, rectangle)) selectedEntity = entity.id;
             }
             for (const auto &text : world.overlayText) {
+                overlayFonts.push_back(*font);
+                nk_user_font &overlayFont = overlayFonts.back();
+                overlayFont.height = static_cast<float>(std::max(1.0, text.size));
+                float textWidth = overlayFont.width(overlayFont.userdata, overlayFont.height,
+                                                    text.text.c_str(), static_cast<int>(text.text.size()));
                 nk_draw_text(commands, nk_rect(bounds.x + text.position.x, bounds.y + text.position.y,
-                    std::max(20.0, text.text.size() * text.size), text.size), text.text.c_str(), static_cast<int>(text.text.size()),
-                    &font, nk_rgba(0,0,0,0), nk_rgba(static_cast<int>(text.r*255),static_cast<int>(text.g*255),static_cast<int>(text.b*255),static_cast<int>(text.a*255)));
+                    textWidth + 1, overlayFont.height), text.text.c_str(), static_cast<int>(text.text.size()),
+                    &overlayFont, nk_rgba(0,0,0,0), nk_rgba(static_cast<int>(text.r*255),static_cast<int>(text.g*255),static_cast<int>(text.b*255),static_cast<int>(text.a*255)));
             }
             nk_layout_space_end(&ui);
         }
@@ -381,10 +388,10 @@ struct App {
     void inspector(float x, float y, float w, float h) {
         if (nk_begin(&ui, "Inspector", nk_rect(x, y, w, h), NK_WINDOW_BACKGROUND)) {
             nk_layout_row_dynamic(&ui, 22, 1);
-            nk_label_colored(&ui, "INSPECTOR  /  native components", NK_TEXT_LEFT, nk_rgb(75, 220, 181));
+            nk_label_colored(&ui, tr("INSPECTOR  /  native components", "ИНСПЕКТОР  /  компоненты"), NK_TEXT_LEFT, nk_rgb(255, 255, 255));
             auto *entity = selected();
             if (!entity) {
-                nk_layout_row_dynamic(&ui, 30, 1); nk_label(&ui, "Select an entity", NK_TEXT_LEFT);
+                nk_layout_row_dynamic(&ui, 30, 1); nk_label(&ui, tr("Select an entity", "Выберите объект"), NK_TEXT_LEFT);
             } else {
                 nk_layout_row_dynamic(&ui, 25, 1); nk_label(&ui, entity->name.c_str(), NK_TEXT_LEFT);
                 nk_layout_row_dynamic(&ui, 25, 2);
@@ -395,31 +402,31 @@ struct App {
                 nk_property_double(&ui, "W", 1, &entity->sprite.size.x, 4096, 1, 1);
                 nk_property_double(&ui, "H", 1, &entity->sprite.size.y, 4096, 1, 1);
                 nk_layout_row_dynamic(&ui, 25, 1);
-                nk_property_double(&ui, "Rotation", -36000, &entity->transform.rotation, 36000, 0.1, 0.1);
-                nk_property_double(&ui, "Scale", 0.01, &entity->transform.scale, 100, 0.05, 0.05);
-                nk_property_double(&ui, "Angular V", -1000, &entity->body.angularVelocity, 1000, 0.1, 0.1);
-                nk_property_double(&ui, "Red", 0, &entity->sprite.r, 1, 0.01, 0.01);
-                nk_property_double(&ui, "Green", 0, &entity->sprite.g, 1, 0.01, 0.01);
-                nk_property_double(&ui, "Blue", 0, &entity->sprite.b, 1, 0.01, 0.01);
-                nk_property_double(&ui, "Alpha", 0, &entity->sprite.a, 1, 0.01, 0.01);
+                nk_property_double(&ui, tr("Rotation", "Поворот"), -36000, &entity->transform.rotation, 36000, 0.1, 0.1);
+                nk_property_double(&ui, tr("Scale", "Масштаб"), 0.01, &entity->transform.scale, 100, 0.05, 0.05);
+                nk_property_double(&ui, tr("Angular V", "Угл. скор."), -1000, &entity->body.angularVelocity, 1000, 0.1, 0.1);
+                nk_property_double(&ui, tr("Red", "Красный"), 0, &entity->sprite.r, 1, 0.01, 0.01);
+                nk_property_double(&ui, tr("Green", "Зелёный"), 0, &entity->sprite.g, 1, 0.01, 0.01);
+                nk_property_double(&ui, tr("Blue", "Синий"), 0, &entity->sprite.b, 1, 0.01, 0.01);
+                nk_property_double(&ui, tr("Alpha", "Прозрачность"), 0, &entity->sprite.a, 1, 0.01, 0.01);
                 nk_layout_row_dynamic(&ui, 22, 1);
-                nk_label(&ui, "Texture (PNG/JPG path)", NK_TEXT_LEFT);
+                nk_label(&ui, tr("Texture (PNG/JPG path)", "Текстура (путь PNG/JPG)"), NK_TEXT_LEFT);
                 { char path[512]; std::snprintf(path, sizeof(path), "%s", entity->sprite.texture.c_str()); int length = static_cast<int>(std::strlen(path));
                   nk_edit_string(&ui, NK_EDIT_SIMPLE, path, &length, sizeof(path)-1, nk_filter_default); path[length] = 0; entity->sprite.texture = path; }
                 nk_layout_row_dynamic(&ui, 26, 1);
                 nk_bool active = entity->active, kinematic = entity->body.kinematic;
-                if (nk_checkbox_label(&ui, "Active", &active)) entity->active = active;
-                if (nk_checkbox_label(&ui, "Kinematic", &kinematic)) entity->body.kinematic = kinematic;
+                if (nk_checkbox_label(&ui, tr("Active", "Активен"), &active)) entity->active = active;
+                if (nk_checkbox_label(&ui, tr("Kinematic", "Кинематический"), &kinematic)) entity->body.kinematic = kinematic;
                 for (const auto &tag : entity->tags) nk_label(&ui, ("#" + tag).c_str(), NK_TEXT_LEFT);
                 for (const auto &component : entity->components) {
                     std::string value = component.first + " = " + std::to_string(component.second);
                     nk_label(&ui, value.c_str(), NK_TEXT_LEFT);
                 }
                 auto hits = world.collisions(entity->id);
-                std::string collision = "Collisions: " + std::to_string(hits.size());
+                std::string collision = tr("Collisions: ", "Столкновений: ") + std::to_string(hits.size());
                 nk_label(&ui, collision.c_str(), NK_TEXT_LEFT);
                 nk_layout_row_dynamic(&ui, 30, 1);
-                if (nk_button_label(&ui, "Delete entity")) {
+                if (nk_button_label(&ui, tr("Delete entity", "Удалить объект"))) {
                     world.destroy(selectedEntity);
                     selectedEntity = world.entities().empty() ? luac::engine::invalidEntity : world.entities().front().id;
                 }
@@ -450,6 +457,20 @@ struct App {
         }
         nk_end(&ui);
     }
+    void settings() {
+        if (!settingsOpen) return;
+        if (nk_begin(&ui, "Settings panel", nk_rect(std::max(8, width - 300), 66, 280, 160), NK_WINDOW_BORDER)) {
+            nk_layout_row_dynamic(&ui, 25, 1);
+            nk_label(&ui, tr("Settings", "Настройки"), NK_TEXT_LEFT);
+            nk_label(&ui, tr("Language", "Язык"), NK_TEXT_LEFT);
+            nk_layout_row_dynamic(&ui, 30, 2);
+            if (nk_option_label(&ui, "English", !russian)) russian = false;
+            if (nk_option_label(&ui, "Русский", russian)) russian = true;
+            nk_layout_row_dynamic(&ui, 26, 1);
+            if (nk_button_label(&ui, tr("Close", "Закрыть"))) settingsOpen = false;
+        }
+        nk_end(&ui);
+    }
     void draw() {
         toolbar();
         float bodyHeight = static_cast<float>(std::max(40, height - 96));
@@ -460,13 +481,11 @@ struct App {
             output(split + 4, 68, width - split - 12, bodyHeight);
         }
         footer();
+        settings();
         canvas.render(ui, width, height);
-        if (canvas.atlas().dirty()) {
-            renderer.updateTexture(1, LcTextAtlas::size, LcTextAtlas::size, canvas.atlas().pixels().data());
-            canvas.atlas().clearDirty();
-        }
         renderer.render(canvas.vertices, canvas.draws, width, height);
         nk_clear(&ui);
+        overlayFonts.clear();
     }
     void pointer(double x, double y) {
         int logicalWidth = 1, logicalHeight = 1;
@@ -553,6 +572,7 @@ int main(int argc, char **argv) {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     GLFWwindow *window = glfwCreateWindow(1280, 800, "LuaC Studio - Nuklear + Vulkan", nullptr, nullptr);
     if (!window) { glfwTerminate(); return 1; }
+    glfwSetWindowSizeLimits(window, 1000, 500, GLFW_DONT_CARE, GLFW_DONT_CARE);
     App application;
     application.window = window;
     application.compiler = std::getenv("LUAC_COMPILER") ? std::getenv("LUAC_COMPILER") : "./luac";
@@ -569,6 +589,9 @@ int main(int argc, char **argv) {
         application.setSource("-- LuaC Studio / Nuklear immediate UI\nlocal function greet(name)\n  return 'Hello, ' .. name\nend\n\nprint(greet('Vulkan'))\n");
         if (argc > 1) application.load(argv[1]);
         application.renderer.initialize(window, shaders ? shaders : "build");
+        application.renderer.updateTexture(1, application.canvas.atlas().width(),
+            application.canvas.atlas().height(), application.canvas.atlas().pixels());
+        application.canvas.atlas().finish();
         double previousTime = glfwGetTime();
         while (!glfwWindowShouldClose(window)) {
             double currentTime = glfwGetTime();

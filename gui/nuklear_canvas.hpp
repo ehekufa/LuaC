@@ -3,7 +3,7 @@
 #include "text.hpp"
 #include "geometry.hpp"
 /* Nuklear supplies its own extern "C" guards for C++ consumers. */
-#include "third_party/nuklear.h"
+#include "nuklear_config.h"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -129,7 +129,7 @@ public:
             }
             case NK_COMMAND_TEXT: {
                 const auto *c = reinterpret_cast<const nk_command_text *>(command);
-                text(c->x, c->y, c->string, c->length, c->height, color(c->foreground));
+                text(c->x, c->y, c->string, c->length, c->height, c->font, color(c->foreground));
                 break;
             }
             case NK_COMMAND_IMAGE: {
@@ -143,37 +143,12 @@ public:
         if (vertices.size() > UINT32_MAX) vertices.resize(UINT32_MAX);
     }
 
-    float textWidth(float height, const char *value, int length) {
-        float width = 0;
-        for (int i = 0; i < length;) {
-            int bytes = 1;
-            std::uint32_t cp = decodeUtf8(value, length, i, bytes);
-            width += atlas_.glyph(cp, height).advance;
-            i += bytes;
-        }
-        return width;
-    }
-
 private:
     struct Color { float r, g, b, a; };
     struct Clip { int x, y, w, h; };
     Clip clip_{};
     LcTextAtlas atlas_;
 
-    static std::uint32_t decodeUtf8(const char *value, int length, int offset, int &bytes) {
-        unsigned char lead = static_cast<unsigned char>(value[offset]);
-        std::uint32_t cp = 0xfffd;
-        if (lead < 0x80) cp = lead;
-        else if ((lead & 0xe0) == 0xc0 && offset + 1 < length) { cp = lead & 0x1f; bytes = 2; }
-        else if ((lead & 0xf0) == 0xe0 && offset + 2 < length) { cp = lead & 0x0f; bytes = 3; }
-        else if ((lead & 0xf8) == 0xf0 && offset + 3 < length) { cp = lead & 0x07; bytes = 4; }
-        for (int j = 1; j < bytes; ++j) {
-            unsigned char continuation = static_cast<unsigned char>(value[offset+j]);
-            if ((continuation & 0xc0) != 0x80) { cp = 0xfffd; bytes = 1; break; }
-            cp = (cp << 6) | (continuation & 0x3f);
-        }
-        return cp;
-    }
     static Color color(nk_color c) {
         return {c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f};
     }
@@ -289,20 +264,25 @@ private:
         vertexUv(x,y,u0,v0,c);vertexUv(x+w,y,u1,v0,c);vertexUv(x,y+h,u0,v1,c);
         vertexUv(x+w,y,u1,v0,c);vertexUv(x+w,y+h,u1,v1,c);vertexUv(x,y+h,u0,v1,c);batch(first,static_cast<uint32_t>(img.handle.id));
     }
-    void text(float x,float y,const char *value,int length,float height,Color c) {
-        float baseline = y + atlas_.ascent(height);
+    void text(float x, float y, const char *value, int length, float height,
+              const nk_user_font *handle, Color c) {
+        const auto *font = static_cast<const nk_font *>(handle->userdata.ptr);
+        const float scale = height / font->info.height;
         for (int i = 0; i < length;) {
-            int bytes = 1;
-            std::uint32_t cp = decodeUtf8(value, length, i, bytes);
-            LcGlyph g = atlas_.glyph(cp, height);
-            if (g.u1 > g.u0) {
-                float x0=x+g.x0,y0=baseline+g.y0,x1=x+g.x1,y1=baseline+g.y1;
+            nk_rune codepoint;
+            int bytes = nk_utf_decode(value + i, &codepoint, length - i);
+            if (!bytes) break;
+            const nk_font_glyph *g = nk_font_find_glyph(font, codepoint);
+            if (g->u1 > g->u0 && g->v1 > g->v0) {
+                float x0=x+g->x0*scale, y0=y+g->y0*scale;
+                float x1=x+g->x1*scale, y1=y+g->y1*scale;
                 uint32_t first=static_cast<uint32_t>(vertices.size());
-                vertexUv(x0,y0,g.u0,g.v0,c);vertexUv(x1,y0,g.u1,g.v0,c);vertexUv(x0,y1,g.u0,g.v1,c);
-                vertexUv(x1,y0,g.u1,g.v0,c);vertexUv(x1,y1,g.u1,g.v1,c);vertexUv(x0,y1,g.u0,g.v1,c);
+                vertexUv(x0,y0,g->u0,g->v0,c); vertexUv(x1,y0,g->u1,g->v0,c); vertexUv(x0,y1,g->u0,g->v1,c);
+                vertexUv(x1,y0,g->u1,g->v0,c); vertexUv(x1,y1,g->u1,g->v1,c); vertexUv(x0,y1,g->u0,g->v1,c);
                 batch(first,1);
             }
-            x += g.advance; i += bytes;
+            x += g->xadvance * scale;
+            i += bytes;
         }
     }
 };

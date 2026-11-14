@@ -261,8 +261,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Vulkan and GLFW dependencies
-        run: sudo apt-get update && sudo apt-get install -y libglfw3-dev libvulkan-dev glslang-tools pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libglfw3-dev libvulkan-dev glslang-tools pkg-config xvfb xauth xdotool xclip mesa-vulkan-drivers
       - run: make -j2 all gui
+      - name: Vulkan Studio clipboard smoke
+        run: xvfb-run -a ./tests/studio_smoke.sh
       - name: Package
         run: |
           mkdir -p dist/studio-linux/build

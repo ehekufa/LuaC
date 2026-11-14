@@ -27724,9 +27724,9 @@ nk_textedit_paste(struct nk_text_edit *state, char const *ctext, int len)
 
     /* try to insert the characters */
     glyphs = nk_utf_len(ctext, len);
-    if (nk_str_insert_text_char(&state->string, state->cursor, text, len)) {
+    if (nk_str_insert_at_rune(&state->string, state->cursor, text, len)) {
         nk_textedit_makeundo_insert(state, state->cursor, glyphs);
-        state->cursor += len;
+        state->cursor += glyphs;
         state->has_preferred_x = 0;
         return 1;
     }
@@ -28694,8 +28694,11 @@ nk_do_edit(nk_flags *state, struct nk_command_buffer *out,
             int begin = NK_MIN(b, e);
             int end = NK_MAX(b, e);
             text = nk_str_at_const(&edit->string, begin, &unicode, &glyph_len);
-            if (edit->clip.copy)
-                edit->clip.copy(edit->clip.userdata, text, end - begin);
+            /* Selection indices count runes, while clipboard callbacks need bytes. */
+            if (edit->clip.copy && text && end > begin) {
+                const char *end_text = nk_str_at_const(&edit->string, end, &unicode, &glyph_len);
+                if (end_text) edit->clip.copy(edit->clip.userdata, text, (int)(end_text - text));
+            }
             if (cut && !(flags & NK_EDIT_READ_ONLY)){
                 nk_textedit_cut(edit);
                 cursor_follow = nk_true;

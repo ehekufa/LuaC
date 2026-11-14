@@ -1,39 +1,42 @@
 #pragma once
-#include "font_plex_mono.hpp"
-#include <algorithm>
-#include <cstdint>
-#include <unordered_map>
-#include <vector>
-#define STBTT_STATIC
-#define STB_TRUETYPE_IMPLEMENTATION
-#include "../src/third_party/stb_truetype.h"
+#include "nuklear_config.h"
+#include "font_studio_mono.hpp"
+#include <stdexcept>
 
-struct LcGlyph {
-    float x0=0,y0=0,x1=0,y1=0,u0=0,v0=0,u1=0,v1=0,advance=0;
-};
+/* The atlas owns the baked glyphs until the UI and command list are finished. */
 class LcTextAtlas {
 public:
-    static const int size=1024;
-    LcTextAtlas():font_(lc_plex_mono_ttf,lc_plex_mono_ttf+lc_plex_mono_ttf_size),pixels_(size*size*4,0){
-        if(!stbtt_InitFont(&info_,font_.data(),0))valid_=false;
-        for(std::size_t i=0;i<pixels_.size();i+=4)pixels_[i]=pixels_[i+1]=pixels_[i+2]=255;
-        int ascent=0,descent=0,line=0;stbtt_GetFontVMetrics(&info_,&ascent,&descent,&line);ascent_=ascent;
+    LcTextAtlas() {
+        nk_font_atlas_init_default(&atlas_);
+        nk_font_atlas_begin(&atlas_);
+        struct nk_font_config config = nk_font_config(16.0f);
+        config.range = lc_studio_glyph_ranges;
+        config.fallback_glyph = '?';
+        font_ = nk_font_atlas_add_from_memory(&atlas_,
+            const_cast<unsigned char *>(lc_studio_mono_ttf), lc_studio_mono_ttf_size, 16.0f, &config);
+        if (font_) pixels_ = nk_font_atlas_bake(&atlas_, &width_, &height_, NK_FONT_ATLAS_RGBA32);
+        if (!font_ || !pixels_) {
+            nk_font_atlas_clear(&atlas_);
+            throw std::runtime_error("Could not bake the Studio font atlas");
+        }
     }
-    bool valid()const{return valid_;}
-    const std::vector<unsigned char>& pixels()const{return pixels_;}
-    bool dirty()const{return dirty_;}
-    void clearDirty(){dirty_=false;}
-    float ascent(float height)const{return ascent_*stbtt_ScaleForPixelHeight(&info_,height);}
-    LcGlyph glyph(std::uint32_t cp,float height){
-        int pixels=std::max(6,static_cast<int>(height+0.5f));std::uint64_t key=(static_cast<std::uint64_t>(pixels)<<32)|cp;auto found=cache_.find(key);if(found!=cache_.end())return found->second;
-        float scale=stbtt_ScaleForPixelHeight(&info_,static_cast<float>(pixels));int advance=0,left=0,x0=0,y0=0,x1=0,y1=0;stbtt_GetCodepointHMetrics(&info_,cp,&advance,&left);stbtt_GetCodepointBitmapBox(&info_,cp,scale,scale,&x0,&y0,&x1,&y1);
-        LcGlyph g;g.advance=advance*scale;g.x0=static_cast<float>(x0);g.y0=static_cast<float>(y0);g.x1=static_cast<float>(x1);g.y1=static_cast<float>(y1);int w=std::max(0,x1-x0),h=std::max(0,y1-y0);
-        if(w&&h){if(shelfX_+w+1>=size){shelfX_=1;shelfY_+=shelfHeight_+1;shelfHeight_=0;}if(shelfY_+h+1>=size){g.advance=0;cache_[key]=g;return g;}std::vector<unsigned char> bitmap(static_cast<std::size_t>(w)*h);stbtt_MakeCodepointBitmap(&info_,bitmap.data(),w,h,w,scale,scale,cp);for(int y=0;y<h;++y)for(int x=0;x<w;++x){std::size_t at=((shelfY_+y)*size+shelfX_+x)*4;pixels_[at+3]=bitmap[y*w+x];}g.u0=static_cast<float>(shelfX_)/size;g.v0=static_cast<float>(shelfY_)/size;g.u1=static_cast<float>(shelfX_+w)/size;g.v1=static_cast<float>(shelfY_+h)/size;shelfX_+=w+1;shelfHeight_=std::max(shelfHeight_,h);dirty_=true;}
-        cache_[key]=g;return g;
+    ~LcTextAtlas() { nk_font_atlas_clear(&atlas_); }
+    LcTextAtlas(const LcTextAtlas &) = delete;
+    LcTextAtlas &operator=(const LcTextAtlas &) = delete;
+    nk_user_font *font() { return &font_->handle; }
+    const nk_font *bakedFont() const { return font_; }
+    const unsigned char *pixels() const { return static_cast<const unsigned char *>(pixels_); }
+    int width() const { return width_; }
+    int height() const { return height_; }
+    void finish() {
+        if (pixels_) {
+            nk_font_atlas_end(&atlas_, nk_handle_id(1), nullptr);
+            pixels_ = nullptr;
+        }
     }
 private:
-    std::vector<unsigned char> font_;
-    std::vector<unsigned char> pixels_;
-    std::unordered_map<std::uint64_t,LcGlyph> cache_;
-    stbtt_fontinfo info_{};int ascent_=0,shelfX_=1,shelfY_=1,shelfHeight_=0;bool valid_=true,dirty_=false;
+    nk_font_atlas atlas_{};
+    nk_font *font_ = nullptr;
+    const void *pixels_ = nullptr;
+    int width_ = 0, height_ = 0;
 };

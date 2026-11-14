@@ -78,10 +78,10 @@ $(BUILD)/libluac.$(SHARED_EXT): $(BUILD)/luac.o
 	$(CC) $(SHARED_FLAG) $< -o $@
 
 # Nuklear stays C99 and uses only the fixed arena supplied by the Studio.
-$(BUILD)/nuklear.o: gui/nuklear_impl.c gui/third_party/nuklear.h | $(BUILD)
+$(BUILD)/nuklear.o: gui/nuklear_impl.c gui/nuklear_config.h gui/third_party/nuklear.h | $(BUILD)
 	$(CC) -std=c99 $(CFLAGS) $(WARNINGS) -I gui -c gui/nuklear_impl.c -o $@
 
-$(BUILD)/ui-test$(EXE): tests/ui_test.cpp gui/nuklear_canvas.hpp gui/geometry.hpp gui/text.hpp gui/font_plex_mono.hpp src/third_party/stb_truetype.h $(BUILD)/nuklear.o
+$(BUILD)/ui-test$(EXE): tests/ui_test.cpp gui/nuklear_canvas.hpp gui/geometry.hpp gui/text.hpp gui/font_studio_mono.hpp gui/nuklear_config.h $(BUILD)/nuklear.o
 	$(CXX) -std=c++17 $(CXXFLAGS) $(WARNINGS) -I gui tests/ui_test.cpp $(BUILD)/nuklear.o -o $@
 
 $(BUILD)/engine-test$(EXE): tests/engine_test.cpp src/engine.hpp | $(BUILD)

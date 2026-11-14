@@ -180,7 +180,7 @@ if (nk_begin(&ui, "Toolbar", nk_rect(0, 0, width, 64), NK_WINDOW_BACKGROUND)) {
 nk_end(&ui);
 ```
 
-Зависимость закреплена в `gui/third_party/nuklear.h`; исходный upstream commit и лицензия указаны рядом с header. Bitmap-renderer сохраняет UTF-8 в файле, но пока отображает не-ASCII символы как `?`; полноценный font atlas можно добавить отдельно без изменения языка или compiler runtime.
+Зависимость закреплена в `gui/third_party/nuklear.h`; исходный upstream commit и лицензия указаны рядом с header. Desktop Studio использует встроенный набор Noto Sans Mono (OFL, `gui/FONT-LICENSE.txt`), запекаемый Nuklear в Vulkan-атлас. Редактор, вывод и текст Engine поддерживают UTF-8: латиницу, кириллицу U+0400–U+052F, греческий и доступную пунктуацию. Отсутствующие в шрифте символы отображаются как `?`, но текст в файле не изменяется. CJK, emoji, объединяющие знаки, сложный shaping и RTL не поддерживаются. GLFW передаёт Unicode-ввод и UTF-8 буфер обмена. По умолчанию интерфейс английский; Settings → Language переключает его на русский в текущем сеансе. Подсказки и сообщения компилятора остаются на английском.
 
 ```sh
 # Debian/Ubuntu
