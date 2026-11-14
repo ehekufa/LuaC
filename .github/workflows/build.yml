@@ -226,7 +226,13 @@ jobs:
             status=$?
             trap - ERR
             [ ! -f error.txt ] || cat error.txt
-            message=$(tail -c 2500 "$log" | tr '\r\n' '  ' | sed 's/%/%25/g')
+            echo 'DLL dependencies:'
+            for dll in "$scratch"/install/*.dll "$(cygpath -u "$TEMP")"/luac-*/main.c.dll; do
+              [ -f "$dll" ] || continue
+              echo "$(basename "$dll")"
+              /ucrt64/bin/objdump -p "$dll" | grep 'DLL Name:' || true
+            done
+            message=$(tail -c 5000 "$log" | tr '\r\n' '  ' | sed 's/%/%25/g')
             printf '::error file=src/luac.c::Windows TinyCC test line %s: %s\n' "$1" "$message"
             exit "$status"
           }
