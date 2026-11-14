@@ -51,12 +51,23 @@ jobs:
             printf '::error file=CMakeLists.txt::%s\n' "$message"
             exit "$status"
           fi
-          cmake --install build-cmake --prefix "$GITHUB_WORKSPACE/dist/cmake-prefix"
-          cmake -S examples/embed -B build-embed -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/dist/cmake-prefix"
-          cmake --build build-embed -j2
-          ./build-embed/luac-embed-compiler
-          ./build-embed/luac-embed-native
-          ./build-embed/luac-embed-engine
+          set +e
+          {
+            cmake --install build-cmake --prefix "$GITHUB_WORKSPACE/dist/cmake-prefix" &&
+            cmake -S examples/embed -B build-embed -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/dist/cmake-prefix" &&
+            cmake --build build-embed -j2 &&
+            ./build-embed/luac-embed-compiler &&
+            ./build-embed/luac-embed-native &&
+            ./build-embed/luac-embed-engine
+          } > cmake-consumer.log 2>&1
+          status=$?
+          set -e
+          cat cmake-consumer.log
+          if [ "$status" -ne 0 ]; then
+            message=$(tail -c 6000 cmake-consumer.log | tr '\r\n' '  ' | sed 's/%/%25/g')
+            printf '::error file=examples/embed/CMakeLists.txt::%s\n' "$message"
+            exit "$status"
+          fi
 
   linux:
     name: Linux CLI and libraries
