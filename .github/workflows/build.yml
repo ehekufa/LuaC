@@ -304,17 +304,7 @@ jobs:
           arch: x86_64
           target: default
           disable-animations: true
-          script: |
-            cd android
-            gradle --no-daemon :app:connectedDebugAndroidTest
-            adb exec-out run-as com.luac.studio cat files/device-project.apk > /tmp/luac-project-test.apk
-            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose /tmp/luac-project-test.apk
-            "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c 4 /tmp/luac-project-test.apk
-            adb install -r /tmp/luac-project-test.apk
-            adb shell am start -n com.luac.projectrunner/com.luac.studio.MainActivity
-            sleep 10
-            adb shell uiautomator dump /sdcard/luac-window.xml
-            adb shell cat /sdcard/luac-window.xml | grep 'PROJECT APK DEVICE OK'
+          script: cd android && bash tests/run_apk_device.sh
       - name: Package APK
         run: mkdir -p dist && cp android/app/build/outputs/apk/debug/app-debug.apk dist/LuaC-Studio-debug.apk
       - uses: actions/upload-artifact@v4
