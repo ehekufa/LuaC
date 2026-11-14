@@ -102,13 +102,11 @@ struct App {
     static void clipboardCopy(nk_handle handle, const char *text, int length) {
         auto *window = static_cast<GLFWwindow *>(handle.ptr);
         std::string value(text, static_cast<size_t>(length));
-        if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "copy=%s\n", value.c_str());
         glfwSetClipboardString(window, value.c_str());
     }
     static void clipboardPaste(nk_handle handle, nk_text_edit *edit) {
         auto *window = static_cast<GLFWwindow *>(handle.ptr);
         const char *value = glfwGetClipboardString(window);
-        if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "paste=%s\n", value ? value : "(null)");
         if (value) nk_textedit_paste(edit, value, static_cast<int>(std::strlen(value)));
     }
     void initializeUi() {
@@ -271,10 +269,8 @@ struct App {
             nk_label_colored(&ui, dirty ? tr("SOURCE  /  modified", "КОД  /  изменён") : tr("SOURCE", "КОД"), NK_TEXT_LEFT,
                              nk_rgb(255, 255, 255));
             nk_layout_row_dynamic(&ui, std::max(30.0f, h - 66), 1);
-            nk_flags editFlags = nk_edit_string(&ui, NK_EDIT_BOX, sourceStorage.data(), &sourceLength,
+            nk_edit_string(&ui, NK_EDIT_BOX, sourceStorage.data(), &sourceLength,
                            static_cast<int>(sourceStorage.size()), nk_filter_default);
-            if (std::getenv("LUAC_UI_TRACE") && (editFlags & (NK_EDIT_ACTIVATED | NK_EDIT_DEACTIVATED)))
-                std::fprintf(stderr, "editor flags=%u length=%d\n", editFlags, sourceLength);
             if (sourceLength != observedLength ||
                 std::memcmp(sourceStorage.data(), observedSource.data(), static_cast<size_t>(sourceLength)) != 0) {
                 std::memcpy(observedSource.data(), sourceStorage.data(), static_cast<size_t>(sourceLength));
@@ -517,7 +513,6 @@ void characters(GLFWwindow *window, unsigned int codepoint) {
 void key(GLFWwindow *window, int keyCode, int, int action, int mods) {
     App *a = app(window);
     bool down = action != GLFW_RELEASE;
-    if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "key=%d action=%d mods=%d ctrl=%d\n", keyCode, action, mods, a->controlDown);
     a->world.input.setKey(keyCode, down);
     if (keyCode == GLFW_KEY_LEFT_CONTROL || keyCode == GLFW_KEY_RIGHT_CONTROL) {
         a->controlDown = down; nk_input_key(&a->ui, NK_KEY_CTRL, down); return;
@@ -575,7 +570,6 @@ void mouseButton(GLFWwindow *window, int button, int action, int) {
     else if (button == GLFW_MOUSE_BUTTON_RIGHT) mapped = NK_BUTTON_RIGHT;
     else return;
     App *a = app(window);
-    if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "mouse=%d action=%d at=%.0f,%.0f\n", button, action, a->mouseX, a->mouseY);
     a->world.input.setMouseButton(button, action != GLFW_RELEASE);
     nk_input_button(&a->ui, mapped, static_cast<int>(a->mouseX), static_cast<int>(a->mouseY),
                     action != GLFW_RELEASE);
