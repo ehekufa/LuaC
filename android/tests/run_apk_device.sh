@@ -33,6 +33,12 @@ adb shell am start -n "$first/com.luac.studio.MainActivity"
 sleep 10
 adb shell uiautomator dump /sdcard/luac-window.xml
 adb shell cat /sdcard/luac-window.xml | grep 'PROJECT APK DEVICE OK'
+adb shell settings put system accelerometer_rotation 0
+adb shell settings put system user_rotation 1
+sleep 5
+adb shell uiautomator dump /sdcard/luac-window.xml
+adb shell cat /sdcard/luac-window.xml | grep 'PROJECT APK DEVICE OK'
+adb shell settings put system user_rotation 0
 adb shell am start -n "$second/com.luac.studio.MainActivity"
 sleep 10
 adb shell uiautomator dump /sdcard/luac-window.xml

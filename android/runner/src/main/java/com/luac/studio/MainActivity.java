@@ -24,6 +24,11 @@ public final class MainActivity extends Activity {
     private static native String nativeStepProject(double dt);
     private static native void nativeTouchProject(int id, double x, double y, boolean down);
     private static native void nativeCloseProject();
+    // The JNI runtime owns one native project per process. Activity recreation
+    // must not let an old loader close or step a newer activity's project.
+    private static final Object SESSION_LOCK = new Object();
+    private static final Object INSTALL_LOCK = new Object();
+    private static MainActivity owner;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final StringBuilder log = new StringBuilder();
     private volatile boolean destroyed;
@@ -38,14 +43,24 @@ public final class MainActivity extends Activity {
             long now = System.nanoTime();
             double dt = previous == 0 ? 1.0 / 60 : Math.min(.05, (now - previous) / 1e9);
             previous = now;
-            try { apply(new JSONObject(nativeStepProject(dt))); }
-            catch (Throwable error) { fail("Runtime error: " + error); }
+            try {
+                synchronized (SESSION_LOCK) {
+                    if (owner != MainActivity.this) return;
+                    apply(new JSONObject(nativeStepProject(dt)));
+                }
+            } catch (Throwable error) { fail("Runtime error: " + error); }
             if (!failed) handler.postDelayed(this, 16);
         }
     };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        synchronized (SESSION_LOCK) {
+            if (owner != null) {
+                try { nativeCloseProject(); } catch (UnsatisfiedLinkError ignored) { }
+            }
+            owner = this;
+        }
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.rgb(7, 13, 20));
@@ -74,23 +89,34 @@ public final class MainActivity extends Activity {
             StringBuilder id = new StringBuilder("project-");
             for (byte b : digest.digest()) id.append(String.format(java.util.Locale.ROOT, "%02x", b & 255));
             File project = new File(getFilesDir(), id.toString());
-            if (!project.isDirectory()) {
-                File staging = Files.createTempDirectory(getFilesDir().toPath(), ".install-").toFile();
-                try {
-                    ProjectFiles.write(document, staging);
-                    if (!new File(staging, "main.lua").isFile()) throw new java.io.IOException("main.lua is missing");
-                    Files.move(staging.toPath(), project.toPath());
-                } catch (Exception error) {
-                    try { ProjectFiles.delete(staging); } catch (Exception cleanup) { error.addSuppressed(cleanup); }
-                    throw error;
+            synchronized (INSTALL_LOCK) {
+                if (!project.isDirectory()) {
+                    File staging = Files.createTempDirectory(getFilesDir().toPath(), ".install-").toFile();
+                    try {
+                        ProjectFiles.write(document, staging);
+                        if (!new File(staging, "main.lua").isFile()) throw new java.io.IOException("main.lua is missing");
+                        Files.move(staging.toPath(), project.toPath());
+                    } catch (Exception error) {
+                        try { ProjectFiles.delete(staging); } catch (Exception cleanup) { error.addSuppressed(cleanup); }
+                        throw error;
+                    }
                 }
             }
-            String initial = nativeOpenProject(project.getAbsolutePath());
+            final String initial;
+            synchronized (SESSION_LOCK) {
+                if (destroyed || owner != this) return;
+                initial = nativeOpenProject(project.getAbsolutePath());
+            }
             handler.post(() -> {
-                if (destroyed) { nativeCloseProject(); return; }
-                opened = true;
+                synchronized (SESSION_LOCK) {
+                    if (owner != this) return;
+                    if (destroyed) { nativeCloseProject(); owner = null; return; }
+                    opened = true;
+                }
                 runtime = new RuntimeView(this, project, (id1, x, y, down) -> {
-                    if (opened && !failed) nativeTouchProject(id1, x, y, down);
+                    synchronized (SESSION_LOCK) {
+                        if (owner == this && opened && !failed) nativeTouchProject(id1, x, y, down);
+                    }
                 });
                 scene.addView(runtime, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
                 try { apply(new JSONObject(initial)); }
@@ -123,7 +149,15 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onDestroy() {
         destroyed = true; handler.removeCallbacks(frame);
-        if (opened) { nativeCloseProject(); opened = false; }
+        synchronized (SESSION_LOCK) {
+            if (owner == this) {
+                owner = null;
+                // If a loader has returned but not posted yet, its native session
+                // still belongs to this activity and needs to be closed.
+                try { nativeCloseProject(); } catch (UnsatisfiedLinkError ignored) { }
+            }
+            opened = false;
+        }
         if (runtime != null) runtime.dispose();
         super.onDestroy();
     }
