@@ -1,0 +1,11 @@
+--- a/tccelf.c
++++ b/tccelf.c
+@@ -2418 +2418 @@
+-    int i, f, n, phnum, phfill;
++    int i, f, n, phnum, phfill, stack_header;
+@@ -2436,0 +2437 @@
++    stack_header = phnum++;
+@@ -2438,0 +2440,3 @@
++    d->phdr[stack_header].p_type = PT_GNU_STACK;
++    d->phdr[stack_header].p_flags = PF_R | PF_W;
++    d->phdr[stack_header].p_align = 16;

@@ -27,6 +27,7 @@ jobs:
           mkdir -p /tmp/tinycc-src
           curl -fL https://codeload.github.com/tinycc/tinycc/tar.gz/f830a1697e159056b75de40a60464bc43ee670a3 -o /tmp/tinycc.tar.gz
           tar -xzf /tmp/tinycc.tar.gz -C /tmp/tinycc-src --strip-components=1
+          patch -d /tmp/tinycc-src -p1 < tests/tinycc-noexecstack.patch
           (cd /tmp/tinycc-src && ./configure --prefix=/tmp/tinycc-install && make -j2 && make install)
           set +e
           TCC=/tmp/tinycc-install/bin/tcc ./tests/test_tinycc.sh > tinycc-test.log 2>&1
