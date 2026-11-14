@@ -10,7 +10,7 @@ report_failure() {
     [ -f "$report" ] && cat "$report" || true
   done
   adb logcat -d -t 2500 2>/dev/null | grep -E 'AndroidRuntime|FATAL EXCEPTION|Caused by:|luac|LuaC' | tail -100 || true
-  message=$(tail -c 18000 "$log" | tr '\r\n' '  ' | sed 's/%/%25/g')
+  message=$(tail -c 3000 "$log" | tr '\r\n' '  ' | sed 's/%/%25/g')
   printf '::error file=android/tests/run_apk_device.sh::%s\n' "$message"
   exit "$status"
 }
