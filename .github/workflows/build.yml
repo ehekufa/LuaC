@@ -407,6 +407,14 @@ jobs:
             exit 1
           fi
           tail -20 android-build.log
+      - name: Compile native project for Android emulator
+        run: |
+          make -j2 luac
+          mkdir -p tests/.tmp android/app/build/outputs/apk/aot
+          ./luac --emit-c examples/compiled_project/main.lua -o tests/.tmp/generated.c
+          "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang" \
+            -std=gnu99 -O1 -Itests/.tmp -Isrc examples/compiled_project/host.c \
+            -o android/app/build/outputs/apk/aot/compiled-project -lm -ldl
       - name: Package APK
         run: mkdir -p dist && cp android/app/build/outputs/apk/debug/app-debug.apk dist/LuaC-Studio-debug.apk
       - uses: actions/upload-artifact@v4
@@ -419,6 +427,7 @@ jobs:
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            android/app/build/outputs/apk/aot/compiled-project
           retention-days: 2
           if-no-files-found: error
 

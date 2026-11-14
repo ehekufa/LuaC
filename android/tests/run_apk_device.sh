@@ -32,6 +32,12 @@ wait_for_output() {
 if [ "${LUAC_DEVICE_PREBUILT:-0}" != 1 ]; then
   gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
 fi
+# Optional precompiled native project: no interpreter is linked into it.
+if [ -f app/build/outputs/apk/aot/compiled-project ]; then
+  adb push app/build/outputs/apk/aot/compiled-project /data/local/tmp/luac-compiled-project
+  adb shell chmod 755 /data/local/tmp/luac-compiled-project
+  adb shell /data/local/tmp/luac-compiled-project | grep -F 'Compiled project without interpreter: OK'
+fi
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb shell am instrument -w -r com.luac.studio.test/androidx.test.runner.AndroidJUnitRunner | tee /tmp/luac-instrument.log
