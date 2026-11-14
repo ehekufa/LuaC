@@ -34,8 +34,12 @@ public class DeviceApkBuildTest {
         }
         assertTrue(signed.length() > 0);
         String firstId = ApkIdentity.forProject(project);
+        try (FileOutputStream out = new FileOutputStream(new File(project, "main.lua"))) {
+            out.write("print('UPDATED APK DEVICE OK')\nworld = engine.world()\n".getBytes(StandardCharsets.UTF_8));
+        }
+        File updated = new File(context.getFilesDir(), "device-project-update.apk");
         try (InputStream template = context.getAssets().open("runner-template.apk")) {
-            ApkBuilder.build(template, project, unsigned, signed, key.key, key.certificate);
+            ApkBuilder.build(template, project, unsigned, updated, key.key, key.certificate);
         }
         assertEquals(firstId, ApkIdentity.forProject(project));
         File second = new File(context.getCacheDir(), "other-apk-project");
