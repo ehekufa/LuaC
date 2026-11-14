@@ -96,7 +96,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist/linux
-          cp luac build/libluac.a build/libluac.so src/luac.h src/runtime.h src/luac_interpreter.h src/luac_love.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/engine.hpp README.md LICENSE dist/linux/
+          cp luac build/libluac.a build/libluac.so src/luac.h src/runtime.h src/luac_interpreter.h src/luac_love.h src/luac_compiled_project.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/engine.hpp README.md LICENSE dist/linux/
           cp -r src/third_party examples dist/linux/
           tar -C dist -czf dist/LuaC-linux-x86_64.tar.gz linux
           git archive --format=tar.gz --prefix=LuaC-0.5.0/ -o dist/LuaC-source.tar.gz HEAD
@@ -212,7 +212,7 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p dist/windows
-          cp luac.exe build/libluac.a build/libluac.dll src/luac.h src/runtime.h src/luac_interpreter.h src/luac_love.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/engine.hpp README.md LICENSE dist/windows/
+          cp luac.exe build/libluac.a build/libluac.dll src/luac.h src/runtime.h src/luac_interpreter.h src/luac_love.h src/luac_compiled_project.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/engine.hpp README.md LICENSE dist/windows/
           cp -r src/third_party examples dist/windows/
           cp /ucrt64/bin/libmbed*.dll /ucrt64/bin/libwinpthread-1.dll /ucrt64/bin/libgcc_s_seh-1.dll dist/windows/
           mkdir -p dist/windows/licenses
@@ -298,7 +298,7 @@ jobs:
       - name: Package universal sources and native arm64 build
         run: |
           mkdir -p dist/macos
-          cp luac build/libluac.a build/libluac.dylib src/luac.h src/runtime.h src/luac_interpreter.h src/luac_love.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/engine.hpp README.md LICENSE dist/macos/
+          cp luac build/libluac.a build/libluac.dylib src/luac.h src/runtime.h src/luac_interpreter.h src/luac_love.h src/luac_compiled_project.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h src/engine.hpp README.md LICENSE dist/macos/
           cp -r src/third_party examples dist/macos/
           tar -C dist -czf dist/LuaC-macos-arm64.tar.gz macos
       - uses: actions/upload-artifact@v4
@@ -319,7 +319,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist/studio-linux/build
-          cp luac build/luac-gui src/runtime.h src/luac_interpreter.h src/luac_love.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h README.md LICENSE dist/studio-linux/
+          cp luac build/luac-gui src/runtime.h src/luac_interpreter.h src/luac_love.h src/luac_compiled_project.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h README.md LICENSE dist/studio-linux/
           cp gui/third_party/Nuklear-LICENSE gui/FONT-LICENSE.txt dist/studio-linux/
           cp build/*.spv dist/studio-linux/build/
           cp -r src/third_party examples dist/studio-linux/
@@ -357,7 +357,7 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p dist/studio-windows/build
-          cp luac.exe build/luac-gui.exe src/runtime.h src/luac_interpreter.h src/luac_love.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h README.md LICENSE dist/studio-windows/
+          cp luac.exe build/luac-gui.exe src/runtime.h src/luac_interpreter.h src/luac_love.h src/luac_compiled_project.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h README.md LICENSE dist/studio-windows/
           cp gui/third_party/Nuklear-LICENSE gui/FONT-LICENSE.txt dist/studio-windows/
           cp /ucrt64/bin/glfw3.dll dist/studio-windows/
           if [ -f /ucrt64/bin/vulkan-1.dll ]; then cp /ucrt64/bin/vulkan-1.dll dist/studio-windows/; fi

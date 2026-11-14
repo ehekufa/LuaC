@@ -224,6 +224,19 @@ Workflow **Nightly builds** проверяет изменения и публи�
 
 Кнопка **Пакеты** на экране проектов открывает прокручиваемый каталог. Создание примера делает отдельную редактируемую копию: доступны многофайловый проект, JSON/хеши/Base64, сенсорная сцена и FFI. FFI требует совместимые системные `libffi` и C-библиотеку и может быть недоступен на Android; пример сообщает об этом в консоли. В примере сцены `scripts/luac_gui.lua` — небольшой Lua-модуль поверх существующего `engine` с прямоугольниками, текстом и касаниями. Android отображает сцену через Canvas: это не полноценный Love2D и не Vulkan-рендерер.
 
+### Экспериментальный compiled project без интерпретатора
+
+`examples/compiled_project/` показывает многофайловый проект, скомпилированный в C и связанный с тем же `runtime.h`, что использует LuaC. Пример вызывает `update(dt)`, обновляет `engine.world` и передаёт touch из C-хоста; для выполнения парсер, AST-интерпретатор и Lua VM не нужны:
+
+```sh
+mkdir -p tests/.tmp
+./luac --emit-c examples/compiled_project/main.lua -o tests/.tmp/generated.c
+cc -std=gnu99 -Itests/.tmp -Isrc examples/compiled_project/host.c -o tests/.tmp/compiled-project -lm
+./tests/.tmp/compiled-project
+```
+
+`src/luac_compiled_project.h` — экспериментальная внутренняя обвязка для включения после generated C; стабильного ABI пока нет. Literal `require` компилируются вместе с проектом, динамический поиск Lua-файлов и LÖVE callbacks здесь пока не поддерживаются. Это **не замена Android RUN или сборки APK**: они по-прежнему используют встроенный AST-исполнитель. Чтобы убрать его на телефоне, ещё нужны встроенный Android C toolchain, компиляция под нужные ABI, интеграция frame/LÖVE, упаковка нативной библиотеки в APK и проверка ограничений Android на выполнение кода. Текущий вариант не заявляет, что это уже работает.
+
 ### Начало совместимости с LÖVE
 
 В Android RUN и собранном APK встроенный project runner предоставляет `love` без Lua VM. Работают `love.load`, `love.update(dt)`, `love.draw`, `love.touchpressed`, `love.touchmoved`, `love.touchreleased`, а также `love.graphics.setColor/getColor`, `setBackgroundColor/getBackgroundColor`, `getWidth/getHeight/getDimensions`, `rectangle`, `circle`, `print`, `newImage` и `draw` (PNG/JPEG, вращение, масштаб и origin). Координаты — виртуальный экран 800 × 600, сохраняющий пропорции; рисование выполняет Android Canvas. В «Пакетах» есть многофайловый пример **LÖVE-style drawing**. Команды кадра освобождаются перед следующим кадром; их число ограничено 4096. Это пока **не полная совместимость LÖVE**: другие форматы изображений, шрифты, общие трансформации, аудио, клавиатура, физика, filesystem и desktop-окно LÖVE не реализованы. C API Lua и бинарные модули LÖVE/LuaJIT также не совместимы; не ожидайте, что произвольная игра LÖVE запустится без доработок.

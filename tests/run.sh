@@ -103,6 +103,16 @@ tests/.tmp/api-test
 ./build/ui-test
 ./build/engine-test
 
+# Compile a multi-file project into native C and run frames without the AST evaluator.
+./luac --emit-c examples/compiled_project/main.lua -o tests/.tmp/generated.c >/dev/null
+cc -std=gnu99 -O1 -Itests/.tmp -Isrc examples/compiled_project/host.c -o tests/.tmp/compiled-project -lm
+./tests/.tmp/compiled-project
+if [ "${SANITIZE:-0}" = 1 ]; then
+  cc -std=gnu99 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -Itests/.tmp -Isrc examples/compiled_project/host.c -o tests/.tmp/compiled-project-san -lm
+  ASAN_OPTIONS=detect_leaks=1 tests/.tmp/compiled-project-san
+fi
+
 ./luac --emit-c examples/demo.lua -o tests/.tmp/demo.c >/dev/null
 ./luac --emit-c tests/compat.lua -o tests/.tmp/compat.c >/dev/null
 ./luac --emit-c tests/libraries.lua -o tests/.tmp/libraries.c >/dev/null
