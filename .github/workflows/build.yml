@@ -299,7 +299,6 @@ jobs:
   gui-linux:
     name: Vulkan Studio Linux
     runs-on: ubuntu-latest
-    needs: test
     steps:
       - uses: actions/checkout@v4
       - name: Vulkan and GLFW dependencies
@@ -323,7 +322,6 @@ jobs:
   gui-windows:
     name: Vulkan Studio Windows
     runs-on: windows-latest
-    needs: test
     steps:
       - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
