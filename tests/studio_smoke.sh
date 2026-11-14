@@ -30,17 +30,23 @@ click_at() {
   sleep 0.3
   xdotool mouseup 1
 }
-# Open Settings, choose Russian, close it, then edit via the X11 clipboard.
-click_at 925 36
-sleep 0.5
-click_at 1172 145
-sleep 0.5
-click_at 1225 332
-sleep 0.5
-grep -q 'theme=changed' "$work/studio.log"
+# Software Vulkan can render slowly on shared CI runners. Retry only until the
+# expected state appears; this avoids toggling Settings a second time.
+click_until_trace() {
+  local x=$1 y=$2 expected=$3 attempt
+  for attempt in 1 2 3 4 5; do
+    click_at "$x" "$y"
+    sleep 0.7
+    if grep -qF "$expected" "$work/studio.log"; then return 0; fi
+  done
+  echo "UI state not observed: $expected" >&2
+  return 1
+}
+click_until_trace 925 36 'settings=open'
+click_until_trace 1172 145 'language=ru'
+click_until_trace 1225 332 'theme=changed'
 click_at 1115 507
 sleep 0.5
-grep -q 'language=ru' "$work/studio.log"
 test -s "$work/.luac-studio.conf"
 xclip -selection clipboard -i "$work/expected"
 click_at 80 130

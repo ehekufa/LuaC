@@ -301,7 +301,10 @@ struct App {
             nk_layout_row_push(&ui, 100);
             if (nk_button_label(&ui, tr("Save", "Сохранить"))) save();
             nk_layout_row_push(&ui, 100);
-            if (nk_button_label(&ui, tr("Settings", "Настройки"))) settingsOpen = !settingsOpen;
+            if (nk_button_label(&ui, tr("Settings", "Настройки"))) {
+                settingsOpen = !settingsOpen;
+                if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "settings=%s\n", settingsOpen ? "open" : "closed");
+            }
             nk_layout_row_push(&ui, std::max(40.0f, width - 920.0f));
             nk_label(&ui, filename.c_str(), NK_TEXT_RIGHT);
             nk_layout_row_end(&ui);
