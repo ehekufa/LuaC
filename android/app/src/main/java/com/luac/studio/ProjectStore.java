@@ -6,6 +6,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -142,6 +143,37 @@ final class ProjectStore {
             else count++;
         }
         return count;
+    }
+
+    void exportProject(File project, OutputStream output) throws IOException {
+        if (project == null || project.getParentFile() == null ||
+            !project.getParentFile().getCanonicalFile().equals(root.getCanonicalFile()))
+            throw new IOException("Project is outside the projects folder");
+        ProjectArchive.write(project, output);
+    }
+
+    File importProject(InputStream input) throws IOException {
+        ProjectArchive.Document document = ProjectArchive.read(input);
+        File project = unique(root, safeName(document.name, "Project"));
+        if (!project.mkdir()) throw new IOException("Cannot create imported project");
+        try {
+            for (String path : document.directories) {
+                File directory = resolve(project, path);
+                if (!directory.isDirectory() && !directory.mkdirs())
+                    throw new IOException("Cannot create directory: " + path);
+            }
+            for (ProjectArchive.Entry entry : document.files) {
+                File file = resolve(project, entry.path);
+                File parent = file.getParentFile();
+                if (!parent.isDirectory() && !parent.mkdirs())
+                    throw new IOException("Cannot create directory for " + entry.path);
+                try (FileOutputStream output = new FileOutputStream(file)) { output.write(entry.bytes); }
+            }
+            return project;
+        } catch (IOException | RuntimeException error) {
+            try { delete(project); } catch (IOException cleanup) { error.addSuppressed(cleanup); }
+            throw error;
+        }
     }
 
     File importFile(File directory, String requested, InputStream input) throws IOException {

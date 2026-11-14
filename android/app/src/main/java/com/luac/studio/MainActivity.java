@@ -26,10 +26,15 @@ import com.google.android.material.floatingactionbutton.ExtendedFloatingActionBu
 import com.google.android.material.textfield.TextInputEditText;
 import java.io.File;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import org.json.JSONObject;
 
 public final class MainActivity extends AppCompatActivity {
     private static final int PICK_ASSET = 41;
+    private static final int IMPORT_PROJECT = 42;
+    private static final int EXPORT_PROJECT = 43;
 
     private static boolean nativeAvailable;
     private static String nativeLoadError = "";
@@ -51,7 +56,7 @@ public final class MainActivity extends AppCompatActivity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private ProjectStore store;
-    private File project, directory, editorFile, imageFile, importDirectory;
+    private File project, directory, editorFile, imageFile, importDirectory, exportProject;
     private EditText editor;
     private TextView output;
     private RuntimeView runtimeView;
@@ -78,6 +83,15 @@ public final class MainActivity extends AppCompatActivity {
         try { if (store.projects().isEmpty()) store.createProject("Demo"); }
         catch (Exception error) { toast(error); }
         showProjects();
+        if (state != null) {
+            String pending = state.getString("exportProject");
+            if (pending != null) exportProject = new File(pending);
+        }
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        if (exportProject != null) state.putString("exportProject", exportProject.getAbsolutePath());
+        super.onSaveInstanceState(state);
     }
 
     private void toast(Throwable error) { Toast.makeText(this, String.valueOf(error.getMessage() == null ? error : error.getMessage()), Toast.LENGTH_LONG).show(); }
@@ -106,6 +120,11 @@ public final class MainActivity extends AppCompatActivity {
         if (nativeAvailable) try { version = nativeVersion(); } catch (Throwable ignored) { }
         bar.setTitle("LuaC Studio");
         bar.setSubtitle(version + " • in-process runtime");
+        bar.inflateMenu(R.menu.menu_projects);
+        bar.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == R.id.action_import_project) { pickProject(); return true; }
+            return false;
+        });
         RecyclerView list = findViewById(R.id.list);
         list.setLayoutManager(new LinearLayoutManager(this));
         ProjectAdapter adapter = new ProjectAdapter(store, store.projects(), new ProjectAdapter.Listener() {
@@ -114,6 +133,7 @@ public final class MainActivity extends AppCompatActivity {
             @Override public void onRename(File item) {
                 renameDialog(item, renamed -> { showProjects(); toast("Renamed to " + renamed.getName()); });
             }
+            @Override public void onExport(File item) { exportProject(item); }
             @Override public void onDelete(File item) { confirmDelete(item, MainActivity.this::showProjects); }
         });
         list.setAdapter(adapter);
@@ -149,6 +169,7 @@ public final class MainActivity extends AppCompatActivity {
                 try { store.createFolder(directory, name); showDirectory(directory); } catch (Exception error) { toast(error); }
             });
             else if (item.getItemId() == R.id.action_import) pickAsset();
+            else if (item.getItemId() == R.id.action_export_project) exportProject(project);
             return true;
         });
         RecyclerView list = findViewById(R.id.list);
@@ -322,6 +343,52 @@ public final class MainActivity extends AppCompatActivity {
         runtimeView = null;
     }
 
+    private void pickProject() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        // .luac is not registered with Android's MIME database.
+        intent.setType("*/*");
+        startActivityForResult(intent, IMPORT_PROJECT);
+    }
+
+    private void exportProject(File selected) {
+        exportProject = selected;
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.putExtra(Intent.EXTRA_TITLE, selected.getName() + ".luac");
+        startActivityForResult(intent, EXPORT_PROJECT);
+    }
+
+    private void importProject(Uri uri) {
+        new Thread(() -> {
+            try (InputStream input = getContentResolver().openInputStream(uri)) {
+                if (input == null) throw new IOException("Cannot open selected project");
+                File imported = store.importProject(input);
+                handler.post(() -> { if (!destroyed) { showProject(imported); toast("Imported " + imported.getName()); } });
+            } catch (Exception error) {
+                handler.post(() -> { if (!destroyed) toast(error); });
+            }
+        }, "LuaC-project-import").start();
+    }
+
+    private void writeProject(Uri uri, File selected) {
+        new Thread(() -> {
+            try {
+                ByteArrayOutputStream archive = new ByteArrayOutputStream();
+                store.exportProject(selected, archive);
+                try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
+                    if (output == null) throw new IOException("Cannot write selected destination");
+                    archive.writeTo(output);
+                    output.flush();
+                }
+                handler.post(() -> { if (!destroyed) toast("Project exported as .luac"); });
+            } catch (Exception error) {
+                handler.post(() -> { if (!destroyed) toast(error); });
+            }
+        }, "LuaC-project-export").start();
+    }
+
     private void pickAsset() {
         importDirectory = directory;
         String path = relative(directory);
@@ -333,6 +400,17 @@ public final class MainActivity extends AppCompatActivity {
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == EXPORT_PROJECT) {
+            File selected = exportProject;
+            exportProject = null;
+            if (result == RESULT_OK && data != null && data.getData() != null && selected != null)
+                writeProject(data.getData(), selected);
+            return;
+        }
+        if (request == IMPORT_PROJECT) {
+            if (result == RESULT_OK && data != null && data.getData() != null) importProject(data.getData());
+            return;
+        }
         if (request != PICK_ASSET || result != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         try (InputStream input = getContentResolver().openInputStream(uri)) {

@@ -15,6 +15,7 @@ final class ProjectAdapter extends RecyclerView.Adapter<ProjectAdapter.Holder> {
         void onOpen(File project);
         void onRun(File project);
         void onRename(File project);
+        void onExport(File project);
         void onDelete(File project);
     }
 
@@ -47,9 +48,10 @@ final class ProjectAdapter extends RecyclerView.Adapter<ProjectAdapter.Holder> {
         holder.run.setOnClickListener(v -> listener.onRun(project));
         holder.more.setOnClickListener(v -> {
             PopupMenu menu = new PopupMenu(v.getContext(), v);
-            menu.inflate(R.menu.menu_item);
+            menu.inflate(R.menu.menu_project_item);
             menu.setOnMenuItemClickListener(item -> {
-                if (item.getItemId() == R.id.action_rename) listener.onRename(project);
+                if (item.getItemId() == R.id.action_export_project) listener.onExport(project);
+                else if (item.getItemId() == R.id.action_rename) listener.onRename(project);
                 else if (item.getItemId() == R.id.action_delete) listener.onDelete(project);
                 return true;
             });
