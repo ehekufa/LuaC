@@ -1,10 +1,12 @@
-name: Native builds
+name: Nightly builds
 
 on:
   push:
     branches: ['**']
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
 
 permissions:
   contents: read
