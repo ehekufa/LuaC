@@ -63,6 +63,21 @@ public class ProjectArchiveTest {
         catch (IOException expected) { assertEquals(0, root.list().length); }
     }
 
+    @Test public void failedInstallLeavesNoProjectOrStagingDirectory() throws Exception {
+        File parent = temporary.newFolder("parent");
+        File root = new File(parent, "projects");
+        ProjectStore store = new ProjectStore(root);
+        String tooLong = new String(new char[300]).replace('\0', 'a');
+        String archive = archive(tooLong, "");
+        try {
+            store.importProject(new ByteArrayInputStream(archive.getBytes(StandardCharsets.UTF_8)));
+            fail("filesystem must reject an overly long filename");
+        } catch (IOException expected) {
+            assertEquals(0, root.list().length);
+            assertArrayEquals(new String[] {"projects"}, parent.list());
+        }
+    }
+
     @Test public void refusesOversizedFilesAndLinksOnExport() throws Exception {
         File root = temporary.newFolder("projects");
         ProjectStore store = new ProjectStore(root);

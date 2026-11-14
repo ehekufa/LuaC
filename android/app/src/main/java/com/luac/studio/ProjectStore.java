@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -154,8 +155,8 @@ final class ProjectStore {
 
     File importProject(InputStream input) throws IOException {
         ProjectArchive.Document document = ProjectArchive.read(input);
-        File project = unique(root, safeName(document.name, "Project"));
-        if (!project.mkdir()) throw new IOException("Cannot create imported project");
+        // Build outside the project list; an incomplete import must never appear as a project.
+        File project = Files.createTempDirectory(root.getParentFile().toPath(), ".luac-import-").toFile();
         try {
             for (String path : document.directories) {
                 File directory = resolve(project, path);
@@ -169,7 +170,9 @@ final class ProjectStore {
                     throw new IOException("Cannot create directory for " + entry.path);
                 try (FileOutputStream output = new FileOutputStream(file)) { output.write(entry.bytes); }
             }
-            return project;
+            File destination = unique(root, safeName(document.name, "Project"));
+            Files.move(project.toPath(), destination.toPath());
+            return destination;
         } catch (IOException | RuntimeException error) {
             try { delete(project); } catch (IOException cleanup) { error.addSuppressed(cleanup); }
             throw error;
