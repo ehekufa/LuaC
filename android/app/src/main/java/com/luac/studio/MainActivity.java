@@ -463,7 +463,7 @@ public final class MainActivity extends AppCompatActivity {
     private void chooseApkDestination(File selected) {
         if (!new File(selected, "main.lua").isFile()) { toast("main.lua is missing"); return; }
         new MaterialAlertDialogBuilder(this).setTitle("Build standalone APK")
-            .setMessage("The APK contains the project and LuaC runtime. Current builds share the same app ID, so only one LuaC project APK can be installed at a time. The signing key stays on this device; reinstalling Studio can prevent updates to previously built APKs.")
+            .setMessage("The APK contains the project and LuaC runtime. Each project has its own app ID, stored in .luac/android-id. The signing key stays on this device; reinstalling Studio can prevent updates to previously built APKs.")
             .setPositiveButton("Choose destination", (dialog, which) -> {
                 apkProject = selected;
                 Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);

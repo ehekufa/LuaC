@@ -33,6 +33,23 @@ public class DeviceApkBuildTest {
             ApkBuilder.build(template, project, unsigned, signed, key.key, key.certificate);
         }
         assertTrue(signed.length() > 0);
+        String firstId = ApkIdentity.forProject(project);
+        try (InputStream template = context.getAssets().open("runner-template.apk")) {
+            ApkBuilder.build(template, project, unsigned, signed, key.key, key.certificate);
+        }
+        assertEquals(firstId, ApkIdentity.forProject(project));
+        File second = new File(context.getCacheDir(), "other-apk-project");
+        if (second.exists()) ProjectFiles.delete(second);
+        assertTrue(second.mkdir());
+        try (FileOutputStream out = new FileOutputStream(new File(second, "main.lua"))) {
+            out.write("print('SECOND APK DEVICE OK')\nworld = engine.world()\n".getBytes(StandardCharsets.UTF_8));
+        }
+        File secondApk = new File(context.getFilesDir(), "device-project-second.apk");
+        try (InputStream template = context.getAssets().open("runner-template.apk")) {
+            ApkBuilder.build(template, second, unsigned, secondApk, key.key, key.certificate);
+        }
+        assertNotEquals(firstId, ApkIdentity.forProject(second));
+        ProjectFiles.delete(second);
         unsigned.delete();
         ProjectFiles.delete(project);
     }

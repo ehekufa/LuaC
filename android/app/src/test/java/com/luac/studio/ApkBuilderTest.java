@@ -66,6 +66,17 @@ public class ApkBuilderTest {
         }
     }
 
+    @Test public void projectIdentityIsStableAndRejectsTampering() throws Exception {
+        File first = temp.newFolder("First"), second = temp.newFolder("Second");
+        String id = ApkIdentity.forProject(first);
+        assertTrue(id.matches("com\\.luac\\.p[0-9a-f]{12}"));
+        assertEquals(id, ApkIdentity.forProject(first));
+        assertNotEquals(id, ApkIdentity.forProject(second));
+        Files.write(new File(first, ".luac/android-id").toPath(), "tampered".getBytes(StandardCharsets.US_ASCII));
+        try { ApkIdentity.forProject(first); fail("invalid id accepted"); }
+        catch (java.io.IOException expected) { }
+    }
+
     private boolean isAligned(File file, String name) throws Exception {
         byte[] zip = Files.readAllBytes(file.toPath()), needle = name.getBytes(StandardCharsets.UTF_8);
         // Locate the central directory record and then the corresponding local header.

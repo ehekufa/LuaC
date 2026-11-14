@@ -21,8 +21,19 @@ grep -q 'OK (1 test)' /tmp/luac-instrument.log
 adb exec-out run-as com.luac.studio cat files/device-project.apk > /tmp/luac-project-test.apk
 "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose /tmp/luac-project-test.apk
 "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c 4 /tmp/luac-project-test.apk
+adb exec-out run-as com.luac.studio cat files/device-project-second.apk > /tmp/luac-project-second.apk
+"$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose /tmp/luac-project-second.apk
+AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+first=$($AAPT dump badging /tmp/luac-project-test.apk | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+second=$($AAPT dump badging /tmp/luac-project-second.apk | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+[ -n "$first" ] && [ -n "$second" ] && [ "$first" != "$second" ]
 adb install -r /tmp/luac-project-test.apk
-adb shell am start -n com.luac.projectrunner/com.luac.studio.MainActivity
+adb install -r /tmp/luac-project-second.apk
+adb shell am start -n "$first/com.luac.studio.MainActivity"
 sleep 10
 adb shell uiautomator dump /sdcard/luac-window.xml
 adb shell cat /sdcard/luac-window.xml | grep 'PROJECT APK DEVICE OK'
+adb shell am start -n "$second/com.luac.studio.MainActivity"
+sleep 10
+adb shell uiautomator dump /sdcard/luac-window.xml
+adb shell cat /sdcard/luac-window.xml | grep 'SECOND APK DEVICE OK'

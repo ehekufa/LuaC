@@ -33,7 +33,11 @@ final class ApkBuilder {
 
     static void build(InputStream template, File project, File unsigned, File output,
                       PrivateKey key, X509Certificate certificate) throws Exception {
+        if (!project.isDirectory() || java.nio.file.Files.isSymbolicLink(project.toPath()))
+            throw new IOException("Project is not a normal directory");
         if (!new File(project, "main.lua").isFile()) throw new IOException("main.lua is missing");
+        String packageName = ApkIdentity.forProject(project);
+        boolean manifestFound = false;
         try (ZipInputStream zip = new ZipInputStream(template);
              CountingStream counted = new CountingStream(new FileOutputStream(unsigned));
              ZipOutputStream result = new ZipOutputStream(counted)) {
@@ -47,7 +51,17 @@ final class ApkBuilder {
                 if (upper.startsWith("META-INF/") && (upper.endsWith(".SF") || upper.endsWith(".RSA") ||
                     upper.endsWith(".DSA") || upper.endsWith(".EC") || upper.equals("META-INF/MANIFEST.MF"))) continue;
                 ZipEntry copy = new ZipEntry(name);
-                if (name.equals("resources.arsc")) {
+                if (name.equals("AndroidManifest.xml")) {
+                    ByteArrayOutputStream manifest = new ByteArrayOutputStream();
+                    int count;
+                    while ((count = zip.read(buffer)) != -1) {
+                        if (manifest.size() + count > 1024 * 1024) throw new IOException("Manifest too large");
+                        manifest.write(buffer, 0, count);
+                    }
+                    byte[] bytes = manifest.toByteArray();
+                    BinaryManifest.setPackage(bytes, packageName);
+                    result.putNextEntry(copy); result.write(bytes); manifestFound = true;
+                } else if (name.equals("resources.arsc")) {
                     // Android 11+ requires this entry to be stored and four-byte aligned.
                     ByteArrayOutputStream data = new ByteArrayOutputStream();
                     int count;
@@ -74,6 +88,7 @@ final class ApkBuilder {
                 }
                 result.closeEntry();
             }
+            if (!manifestFound) throw new IOException("Player template has no manifest");
             result.putNextEntry(new ZipEntry(PROJECT_ASSET));
             ProjectArchive.write(project, result);
             result.closeEntry();
