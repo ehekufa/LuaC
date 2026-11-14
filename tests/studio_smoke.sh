@@ -11,7 +11,7 @@ report_failure() {
   cat "$work/studio.log" 2>/dev/null || true
   if [ -f "$work/source.lua" ]; then printf 'Saved text: '; cat "$work/source.lua"; echo; fi
   local message
-  message=$(cat "$work/studio.log" 2>/dev/null | tail -c 3000 | tr '\r\n' '  ' | sed 's/%/%25/g' || true)
+  message=$( { printf 'log: '; cat "$work/studio.log" 2>/dev/null || true; printf ' copied: '; cat "$work/copied" 2>/dev/null || true; printf ' saved: '; cat "$work/source.lua" 2>/dev/null || true; } | tail -c 3000 | tr '\r\n' '  ' | sed 's/%/%25/g')
   printf '::error file=tests/studio_smoke.sh::Line %s, exit %s: %s\n' "$line" "$status" "$message"
   exit "$status"
 }
