@@ -210,9 +210,11 @@ Android-версия находится в `android/`. При запуске о�
 
 Во встроенном project runtime добавлены `load`, `loadstring`, `loadfile` и `dofile` для текстовых чанков. `load` принимает строку, возвращает функцию или `nil, ошибка`; `loadfile`/`dofile` читают файл. Чанки выполняются в глобальной среде проекта. Функция-reader, бинарные чанки, пользовательская среда и ввод из stdin пока не поддерживаются; в desktop AOT/JIT эти функции пока отсутствуют.
 
+Бинарные форматы `string.pack`, `string.unpack` и `string.packsize` доступны в native runtime и embedded-проектах.
+
 Локальные переменные с атрибутом `<const>` проверяются при компиляции и загрузке, включая присваивания из вложенных функций; изменять поля таблицы, на которую указывает константа, по-прежнему можно.
 
-`<close>`/`__close`, финализаторы `__gc`, классический стековый Lua C API, полноценные userdata, `debug`, `string.pack`/`unpack`/`packsize`/`dump` и расширенные типы/коллбэки/varargs FFI пока не реализованы. Это не полная совместимость с Lua 5.4 или LuaJIT.
+`<close>`/`__close`, финализаторы `__gc`, классический стековый Lua C API, полноценные userdata, `debug`, `string.dump` и расширенные типы/коллбэки/varargs FFI пока не реализованы. Это не полная совместимость с Lua 5.4 или LuaJIT.
 
 ## Библиотеки и C API
 
@@ -240,7 +242,7 @@ luac_free(error);
 
 ## Копирование в собственный build
 
-Lua/LuaJIT не скачиваются и не подключаются. Для compiler + всех native libraries скопируйте `src/luac.c`, `src/luac.h`, `src/runtime.h`, `src/luac_libraries.h`, `src/luac_tls.h`, `src/luac_audio.h` и `src/third_party/`; для embedded project runner также нужен `src/luac_interpreter.h`. Без playback miniaudio header не компилируется, но должен быть доступен в source distribution. Для C++ engine отдельно достаточно `src/engine.hpp`:
+Lua/LuaJIT не скачиваются и не подключаются. Для compiler + всех native libraries скопируйте `src/luac.c`, `src/luac.h`, `src/runtime.h`, `src/luac_pack.h`, `src/luac_libraries.h`, `src/luac_tls.h`, `src/luac_audio.h` и `src/third_party/`; для embedded project runner также нужен `src/luac_interpreter.h`. Без playback miniaudio header не компилируется, но должен быть доступен в source distribution. Для C++ engine отдельно достаточно `src/engine.hpp`:
 
 ```sh
 cc -std=gnu99 -DLUAC_LIBRARY_ONLY -DLUAC_RUNTIME_PATH=\"runtime.h\" \

@@ -1865,17 +1865,25 @@ typedef struct {
 
 typedef struct { char *data; size_t length, capacity; } LcTextBuffer;
 static void lc_text_need(LcContext *ctx, LcTextBuffer *b, size_t extra) {
-    size_t needed = b->length + extra + 1;
+    size_t needed, capacity;
+    char *data;
+    if (extra > SIZE_MAX - b->length - 1) { lc_error(ctx, "string too large"); return; }
+    needed = b->length + extra + 1;
     if (needed <= b->capacity) return;
-    b->capacity = b->capacity ? b->capacity : 128;
-    while (b->capacity < needed) b->capacity *= 2;
-    b->data = (char *)realloc(b->data, b->capacity);
-    if (!b->data) { b->capacity = 0; lc_error(ctx, "out of memory building string"); }
+    capacity = b->capacity ? b->capacity : 128;
+    while (capacity < needed) {
+        if (capacity > SIZE_MAX / 2) { capacity = needed; break; }
+        capacity *= 2;
+    }
+    data = (char *)realloc(b->data, capacity);
+    if (!data) { lc_error(ctx, "out of memory building string"); return; }
+    b->data = data;
+    b->capacity = capacity;
 }
 static void lc_text_add(LcContext *ctx, LcTextBuffer *b, const char *s, size_t n) {
     if (!n || ctx->error) return;
     lc_text_need(ctx, b, n);
-    if (!b->data) return;
+    if (ctx->error) return;
     memcpy(b->data + b->length, s, n); b->length += n; b->data[b->length] = 0;
 }
 static void lc_text_free(LcTextBuffer *b) { free(b->data); memset(b, 0, sizeof(*b)); }
@@ -2860,6 +2868,7 @@ static void lc_add_native(LcContext *ctx, LcValue table, const char *name, LcNat
 }
 
 static void lc_audio_init(LcContext *ctx);
+#include "luac_pack.h"
 #include "luac_libraries.h"
 #include "luac_audio.h"
 
@@ -2910,7 +2919,9 @@ static LcContext *lc_context_new(const char *source) {
     lc_set_field(ctx, math, "maxinteger", lc_integer(INT64_MAX));
     lc_set_field(ctx, math, "mininteger", lc_integer(INT64_MIN));
     lc_set_global(ctx, "math", math);
-    str = lc_table(ctx); lc_add_native(ctx, str, "len", lc_string_len); lc_add_native(ctx, str, "sub", lc_string_sub);
+    str = lc_table(ctx); lc_add_native(ctx, str, "pack", lc_string_pack);
+    lc_add_native(ctx, str, "unpack", lc_string_unpack); lc_add_native(ctx, str, "packsize", lc_string_packsize);
+    lc_add_native(ctx, str, "len", lc_string_len); lc_add_native(ctx, str, "sub", lc_string_sub);
     lc_add_native(ctx, str, "upper", lc_string_case); lc_add_native(ctx, str, "lower", lc_string_case); lc_add_native(ctx, str, "rep", lc_string_rep);
     lc_add_native(ctx, str, "byte", lc_string_byte); lc_add_native(ctx, str, "char", lc_string_char);
     lc_add_native(ctx, str, "reverse", lc_string_reverse); lc_add_native(ctx, str, "format", lc_string_format); lc_add_native(ctx, str, "find", lc_string_find);

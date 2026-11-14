@@ -1,3 +1,7 @@
+local bytes = string.pack('>I2s1', 258, 'hello')
+local integer, text, position = string.unpack('>I2s1', bytes)
+assert(integer == 258 and text == 'hello' and position == 9)
+assert(string.packsize('>I2c4') == 6)
 local immutable <const> = 9
 assert(immutable == 9)
 local badConst, constError = load("local x <const> = 1; x = 2")

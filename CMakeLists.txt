@@ -152,6 +152,21 @@ if(BUILD_TESTING)
     add_test(NAME luac-embedded-project COMMAND luac-embedded-test)
 
     if(LUAC_BUILD_CLI)
+        add_test(NAME luac-pack-jit COMMAND luac_compiler
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/pack.lua")
+        set_tests_properties(luac-pack-jit PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            PASS_REGULAR_EXPRESSION "LuaC binary pack: OK"
+        )
+        add_test(NAME luac-pack-aot
+            COMMAND ${CMAKE_COMMAND}
+                -DLUAC=$<TARGET_FILE:luac_compiler>
+                -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/pack.lua
+                -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/luac-pack-aot
+                -DWORKDIR=${CMAKE_CURRENT_SOURCE_DIR}
+                -DEXPECTED=LuaC.binary.pack:.OK
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunAotTest.cmake
+        )
         add_test(NAME luac-compat-jit COMMAND luac_compiler
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/compat.lua")
         set_tests_properties(luac-compat-jit PROPERTIES
@@ -285,9 +300,9 @@ install(EXPORT LuaCTargets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LuaC
 )
 install(FILES src/luac.h src/engine.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES src/runtime.h src/luac_interpreter.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h
+install(FILES src/runtime.h src/luac_interpreter.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES src/runtime.h src/luac_interpreter.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h
+install(FILES src/runtime.h src/luac_interpreter.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h
     DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)
 install(DIRECTORY src/third_party DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY src/third_party DESTINATION ${CMAKE_INSTALL_DATADIR}/luac)

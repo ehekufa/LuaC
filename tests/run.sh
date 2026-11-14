@@ -3,6 +3,13 @@ set -eu
 cd "$(dirname "$0")/.."
 mkdir -p tests/.tmp
 
+./luac tests/pack.lua > tests/.tmp/pack-jit.out
+printf '%s\n' 'LuaC binary pack: OK' > tests/.tmp/pack-expected.out
+cmp tests/.tmp/pack-expected.out tests/.tmp/pack-jit.out
+./luac --aot tests/pack.lua -o tests/.tmp/pack-aot >/dev/null
+tests/.tmp/pack-aot > tests/.tmp/pack-aot.out
+cmp tests/.tmp/pack-expected.out tests/.tmp/pack-aot.out
+
 python3 tests/const_check.py
 ./luac --check tests/const.lua >/dev/null
 if ./luac --check tests/const_invalid.lua >tests/.tmp/const-invalid.out 2>&1; then
