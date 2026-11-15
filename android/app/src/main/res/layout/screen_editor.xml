@@ -25,6 +25,10 @@
         app:cardCornerRadius="16dp"
         app:cardElevation="0dp">
 
+        <FrameLayout
+            android:id="@+id/editor_host"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
         <EditText
             android:id="@+id/editor"
             android:layout_width="match_parent"
@@ -38,6 +42,7 @@
             android:textColor="?attr/colorOnSurface"
             android:textColorHint="?attr/colorOnSurfaceVariant"
             android:textSize="14sp" />
+        </FrameLayout>
     </com.google.android.material.card.MaterialCardView>
 
     <LinearLayout

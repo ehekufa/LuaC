@@ -1,0 +1,4 @@
+<resources>
+    <item name="blocks_add" type="id" />
+    <item name="blocks_info" type="id" />
+</resources>

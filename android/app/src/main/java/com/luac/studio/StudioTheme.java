@@ -19,6 +19,8 @@ final class StudioTheme {
     static void saveLanguage(Context context, String language) {
         context.getSharedPreferences(PREFS, 0).edit().putString("language", "ru".equals(language) ? "ru" : "en").apply();
     }
+    static boolean blocks(Context context) { return context.getSharedPreferences(PREFS, 0).getBoolean("blocks", false); }
+    static void saveBlocks(Context context, boolean blocks) { context.getSharedPreferences(PREFS, 0).edit().putBoolean("blocks", blocks).apply(); }
     static int color(Context context) { return context.getSharedPreferences(PREFS, 0).getInt("accent", DEFAULT); }
     static void save(Context context, int color) { context.getSharedPreferences(PREFS, 0).edit().putInt("accent", color | 0xff000000).apply(); }
     static int defaultColor() { return DEFAULT; }

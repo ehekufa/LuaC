@@ -204,7 +204,8 @@ final class ProjectStore {
 
     String read(File file) throws IOException {
         try (FileInputStream input = new FileInputStream(file)) {
-            byte[] data = new byte[(int) Math.min(file.length(), 4 * 1024 * 1024)];
+            if (file.length() > 4 * 1024 * 1024) throw new IOException("File is larger than the editor limit (4 MiB)");
+            byte[] data = new byte[(int) file.length()];
             int offset = 0, count;
             while (offset < data.length && (count = input.read(data, offset, data.length - offset)) >= 0) offset += count;
             return new String(data, 0, offset, StandardCharsets.UTF_8);

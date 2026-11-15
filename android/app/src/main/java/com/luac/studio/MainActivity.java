@@ -70,6 +70,7 @@ public final class MainActivity extends AppCompatActivity {
     private ProjectStore store;
     private File project, directory, editorFile, imageFile, importDirectory, exportProject, apkProject;
     private EditText editor;
+    private BlockProgram blockProgram;
     private TextView output;
     private RuntimeView runtimeView;
     private PaintView paintView;
@@ -203,15 +204,27 @@ public final class MainActivity extends AppCompatActivity {
     private void showSettings() {
         String current = StudioTheme.language(this).equals("ru") ? "Русский" : "English";
         String[] choices = {tr("Language", "Язык") + ": " + current,
-                            tr("Theme color", "Цвет темы")};
+                            tr("Theme color", "Цвет темы"),
+                            tr("Editor mode", "Режим редактора") + ": " +
+                                (StudioTheme.blocks(this) ? tr("Blocks", "Блоки") : tr("Script", "Скрипт"))};
         new MaterialAlertDialogBuilder(this).setTitle(tr("Settings", "Настройки"))
             .setItems(choices, (dialog, which) -> {
                 if (which == 0) showLanguageDialog();
+                else if (which == 2) showEditorModeDialog();
                 else showColorDialog(tr("Theme color", "Цвет темы"), StudioTheme.color(this), true, color -> {
                     StudioTheme.save(this, color);
                     StudioTheme.apply(getWindow().getDecorView(), color);
                 });
             }).setNegativeButton(tr("Close", "Закрыть"), null).show();
+    }
+
+    private void showEditorModeDialog() {
+        String[] modes = {tr("Script", "Скрипт"), tr("Blocks", "Блоки")};
+        new MaterialAlertDialogBuilder(this).setTitle(tr("Editor mode", "Режим редактора"))
+            .setSingleChoiceItems(modes, StudioTheme.blocks(this) ? 1 : 0, (dialog, which) -> {
+                StudioTheme.saveBlocks(this, which == 1);
+                dialog.dismiss();
+            }).setNegativeButton(tr("Cancel", "Отмена"), null).show();
     }
 
     private void showLanguageDialog() {
@@ -448,6 +461,7 @@ public final class MainActivity extends AppCompatActivity {
     private void showEditor(File file) {
         stopRuntime();
         editorFile = file;
+        blockProgram = null;
         imageFile = null;
         directory = file.getParentFile();
         MaterialToolbar bar = toolbar(R.layout.screen_editor);
@@ -463,7 +477,17 @@ public final class MainActivity extends AppCompatActivity {
             return true;
         });
         editor = findViewById(R.id.editor);
-        try { editor.setText(store.read(file)); } catch (Exception error) { toast(error); showDirectory(directory); return; }
+        try {
+            String source = store.read(file);
+            editor.setText(source);
+            if (StudioTheme.blocks(this) && file.getName().toLowerCase(Locale.ROOT).endsWith(".lua")) {
+                blockProgram = BlockProgram.open(source);
+                editor.setVisibility(View.GONE);
+                FrameLayout host = findViewById(R.id.editor_host);
+                host.addView(new BlockEditorView(this, blockProgram, StudioTheme.language(this).equals("ru")),
+                    new FrameLayout.LayoutParams(-1, -1));
+            }
+        } catch (Exception error) { toast(error); showDirectory(directory); return; }
         MaterialButton save = findViewById(R.id.save);
         save.setOnClickListener(v -> { if (saveEditor()) toast(tr("Saved", "Сохранено")); });
         MaterialButton run = findViewById(R.id.run);
@@ -486,8 +510,18 @@ public final class MainActivity extends AppCompatActivity {
 
     private boolean saveEditor() {
         if (editor == null || editorFile == null) return true;
-        try { store.write(editorFile, editor.getText().toString()); return true; }
-        catch (Exception error) { toast(error); return false; }
+        try {
+            if (blockProgram != null) {
+                if (!blockProgram.dirty) return true;
+                String source = blockProgram.render();
+                if (source.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 4 * 1024 * 1024)
+                    throw new IOException(tr("File is larger than the editor limit (4 MiB)", "Файл превышает предел редактора (4 МиБ)"));
+                store.write(editorFile, source);
+                editor.setText(source);
+                blockProgram.dirty = false;
+            } else store.write(editorFile, editor.getText().toString());
+            return true;
+        } catch (Exception error) { toast(error); return false; }
     }
     private String compilerCall(String source, boolean generate) {
         if (!nativeAvailable) return "Native library unavailable: " + nativeLoadError;
