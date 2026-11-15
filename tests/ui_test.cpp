@@ -66,6 +66,15 @@ int main() {
     canvas.atlas().finish();
     assert(nk_init_fixed(&ui, arena.data(), arena.size(), font));
     ui.clip.copy = copy; ui.clip.paste = paste;
+    /* Nuklear's capacity includes the terminator; a full #RRGGBB must fit. */
+    char hexInput[8] = "#A0B1C2";
+    int hexLength = 7;
+    if (nk_begin(&ui, "hex", nk_rect(0, 0, 300, 100), NK_WINDOW_NO_SCROLLBAR)) {
+        nk_layout_row_dynamic(&ui, 30, 1);
+        nk_edit_string(&ui, NK_EDIT_FIELD, hexInput, &hexLength, sizeof(hexInput), nk_filter_default);
+    }
+    nk_end(&ui); nk_clear(&ui);
+    assert(hexLength == 7 && parseColorHex(hexInput, hexLength, parsed));
     char source[1024] = "print('Nuklear')";
     int sourceLength = static_cast<int>(std::strlen(source));
     bool clicked = false;

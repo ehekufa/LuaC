@@ -547,7 +547,7 @@ struct App {
             }
             nk_layout_row_begin(&ui, NK_DYNAMIC, 26, 2);
             nk_layout_row_push(&ui, 0.62f);
-            nk_edit_string(&ui, NK_EDIT_FIELD, themeHex, &themeHexLength, 7, nk_filter_default);
+            nk_edit_string(&ui, NK_EDIT_FIELD, themeHex, &themeHexLength, sizeof(themeHex), nk_filter_default);
             themeHex[themeHexLength] = 0;
             nk_layout_row_push(&ui, 0.38f);
             if (nk_button_label(&ui, tr("Apply", "Применить"))) {
