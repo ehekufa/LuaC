@@ -44,7 +44,7 @@ click_until_trace() {
 }
 click_until_trace 185 36 'settings=open'
 click_until_trace 1172 145 'language=ru'
-click_until_trace 1225 332 'theme=changed'
+click_until_trace 1210 320 'theme=changed'
 click_at 1060 446
 xdotool key --clearmodifiers ctrl+a
 sleep 0.3

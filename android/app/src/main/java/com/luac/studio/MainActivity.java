@@ -232,6 +232,7 @@ public final class MainActivity extends AppCompatActivity {
         int padding = (int) (20 * getResources().getDisplayMetrics().density);
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
+        content.setFocusableInTouchMode(true);
         content.setPadding(padding, 0, padding, padding);
         ColorWheelView wheel = new ColorWheelView(this, initial);
         content.addView(wheel, new LinearLayout.LayoutParams(-1, -2));
@@ -279,6 +280,9 @@ public final class MainActivity extends AppCompatActivity {
             .setNegativeButton(tr("Cancel", "Отмена"), null);
         if (reset) builder.setNeutralButton(tr("Default", "По умолчанию"), (d, which) -> onApply.accept(StudioTheme.defaultColor()));
         androidx.appcompat.app.AlertDialog dialog = builder.create();
+        if (dialog.getWindow() != null)
+            dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+        content.requestFocus();
         dialog.setOnShowListener(unused -> dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             Integer color = ColorHex.parse(hex.getText().toString());
             if (color == null) {

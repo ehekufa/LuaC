@@ -529,6 +529,14 @@ struct App {
             nk_layout_row_dynamic(&ui, 22, 1);
             nk_label(&ui, tr("Accent color", "Цвет темы"), NK_TEXT_LEFT);
             nk_layout_row_dynamic(&ui, 215, 1);
+            if (std::getenv("LUAC_UI_TRACE")) {
+                static bool reported = false;
+                if (!reported) {
+                    struct nk_rect bounds = nk_widget_bounds(&ui);
+                    std::fprintf(stderr, "wheel=%.0f,%.0f,%.0f,%.0f\n", bounds.x, bounds.y, bounds.w, bounds.h);
+                    reported = true;
+                }
+            }
             if (themeWheel.draw(&ui)) {
                 themeDirty = true;
                 formatColorHex(themeWheel.color(), themeHex);
