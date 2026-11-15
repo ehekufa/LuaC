@@ -52,7 +52,7 @@ public class ApkBuilderTest {
             ZipEntry resources = zip.getEntry("resources.arsc");
             if (resources != null) {
                 assertEquals(ZipEntry.STORED, resources.getMethod());
-                assertTrue("resources.arsc must be zipaligned", isAligned(signed, "resources.arsc"));
+                assertTrue("resource table must be four-byte aligned", isAligned(signed, "resources.arsc"));
             }
             try (InputStream in = zip.getInputStream(zip.getEntry(ApkBuilder.PROJECT_ASSET))) {
                 ProjectArchive.Document archive = ProjectArchive.read(in);

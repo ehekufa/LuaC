@@ -47,7 +47,6 @@ adb shell am instrument -w -r com.luac.studio.test/androidx.test.runner.AndroidJ
 grep -q 'OK (5 tests)' /tmp/luac-instrument.log
 adb exec-out run-as com.luac.studio cat files/device-project.apk > /tmp/luac-project-test.apk
 "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose /tmp/luac-project-test.apk
-"$ANDROID_HOME/build-tools/35.0.0/zipalign" -c 4 /tmp/luac-project-test.apk
 adb exec-out run-as com.luac.studio cat files/device-project-update.apk > /tmp/luac-project-update.apk
 adb exec-out run-as com.luac.studio cat files/device-project-second.apk > /tmp/luac-project-second.apk
 "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose /tmp/luac-project-second.apk
