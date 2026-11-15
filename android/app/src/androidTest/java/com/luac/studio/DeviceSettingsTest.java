@@ -44,6 +44,20 @@ public class DeviceSettingsTest {
             activity.recreate();
             onView(withId(R.id.fab)).check(matches(withText("Новый проект")));
             assertEquals(0xffff8040, StudioTheme.color(context));
+
+            onView(withText("Demo")).perform(click());
+            activity.onActivity(screen -> {
+                com.google.android.material.appbar.MaterialToolbar bar = screen.findViewById(R.id.toolbar);
+                assertTrue(bar.getMenu().performIdentifierAction(R.id.action_paint, 0));
+            });
+            onView(withId(R.id.paint_color)).perform(click());
+            onView(withContentDescription("Цвет в HEX")).perform(replaceText("#1888CC"), closeSoftKeyboard());
+            onView(withText("Применить")).perform(click());
+            onView(withId(R.id.paint_color)).check(matches(withText("Цвет #1888CC")));
+            activity.onActivity(screen -> {
+                android.widget.FrameLayout canvas = screen.findViewById(R.id.paint_canvas);
+                assertEquals(0xff1888cc, ((PaintView) canvas.getChildAt(0)).getBrushColor());
+            });
         } finally {
             StudioTheme.saveLanguage(context, beforeLanguage);
             StudioTheme.save(context, beforeColor);
