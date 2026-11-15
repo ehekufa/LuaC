@@ -10,24 +10,24 @@
         <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:orientation="horizontal" android:paddingHorizontal="8dp">
             <com.google.android.material.button.MaterialButton android:id="@+id/paint_color"
-                android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Color" />
+                android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/paint_color" />
             <com.google.android.material.button.MaterialButton android:id="@+id/paint_eraser"
-                android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Eraser" />
+                android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/paint_eraser" />
             <com.google.android.material.button.MaterialButton android:id="@+id/paint_undo"
-                android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Undo" />
+                android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/paint_undo" />
             <com.google.android.material.button.MaterialButton android:id="@+id/paint_clear"
-                android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Clear" />
+                android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/paint_clear" />
             <com.google.android.material.button.MaterialButton android:id="@+id/paint_save"
-                android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Save PNG" />
+                android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/paint_save" />
         </LinearLayout>
     </HorizontalScrollView>
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:gravity="center_vertical" android:orientation="horizontal" android:paddingHorizontal="16dp">
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="Brush size" android:textColor="#FFFFFF" />
+            android:text="@string/paint_size" android:textColor="#FFFFFF" />
         <SeekBar android:id="@+id/paint_size" android:layout_width="0dp" android:layout_weight="1"
             android:layout_height="wrap_content" android:max="63" android:progress="7"
-            android:contentDescription="Brush size" />
+            android:contentDescription="@string/paint_size" />
     </LinearLayout>
     <FrameLayout android:id="@+id/paint_canvas" android:layout_width="match_parent"
         android:layout_height="0dp" android:layout_weight="1" android:padding="12dp" />

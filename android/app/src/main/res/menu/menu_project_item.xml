@@ -3,13 +3,13 @@
     <item
         android:id="@+id/action_export_project"
         android:icon="@drawable/ic_upload"
-        android:title="Export .luac" />
+        android:title="@string/action_export_archive" />
     <item
         android:id="@+id/action_rename"
         android:icon="@drawable/ic_edit"
-        android:title="Rename" />
+        android:title="@string/action_rename" />
     <item
         android:id="@+id/action_delete"
         android:icon="@drawable/ic_delete"
-        android:title="Delete" />
+        android:title="@string/action_delete" />
 </menu>

@@ -43,13 +43,13 @@
             android:id="@+id/run"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Run"
+            android:text="@string/action_run"
             app:icon="@drawable/ic_play"
             style="@style/Widget.Material3.Button.TonalButton" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/more"
-            android:contentDescription="More options"
+            android:contentDescription="@string/more_options"
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:minWidth="48dp"

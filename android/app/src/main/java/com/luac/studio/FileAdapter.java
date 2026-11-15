@@ -41,7 +41,7 @@ final class FileAdapter extends RecyclerView.Adapter<FileAdapter.Holder> {
         File file = items.get(position);
         holder.name.setText(file.getName());
         holder.icon.setImageResource(icon(file));
-        holder.subtitle.setText(subtitle(file));
+        holder.subtitle.setText(subtitle(file, StudioTheme.language(holder.itemView.getContext()).equals("ru")));
         holder.card.setOnClickListener(v -> listener.onOpen(file));
         holder.more.setOnClickListener(v -> {
             PopupMenu menu = new PopupMenu(v.getContext(), v);
@@ -65,13 +65,13 @@ final class FileAdapter extends RecyclerView.Adapter<FileAdapter.Holder> {
         return R.drawable.ic_file;
     }
 
-    private static String subtitle(File file) {
-        if (file.isDirectory()) return "Folder";
+    private static String subtitle(File file, boolean russian) {
+        if (file.isDirectory()) return russian ? "Папка" : "Folder";
         String name = file.getName().toLowerCase();
-        if (name.equals("main.lua")) return "Entry point";
-        if (name.endsWith(".lua")) return "Lua script";
-        if (name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".webp")) return "Image asset";
-        return "File";
+        if (name.equals("main.lua")) return russian ? "Точка входа" : "Entry point";
+        if (name.endsWith(".lua")) return russian ? "Скрипт Lua" : "Lua script";
+        if (name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".webp")) return russian ? "Изображение" : "Image asset";
+        return russian ? "Файл" : "File";
     }
 
     static final class Holder extends RecyclerView.ViewHolder {

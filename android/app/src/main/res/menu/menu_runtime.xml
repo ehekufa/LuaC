@@ -4,5 +4,5 @@
         android:id="@+id/action_stop"
         app:showAsAction="ifRoom"
         android:icon="@drawable/ic_stop"
-        android:title="Stop and edit" />
+        android:title="@string/action_stop_edit" />
 </menu>

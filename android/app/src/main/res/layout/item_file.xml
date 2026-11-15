@@ -45,7 +45,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/more"
-            android:contentDescription="More options"
+            android:contentDescription="@string/more_options"
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:minWidth="48dp"

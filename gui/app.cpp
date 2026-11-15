@@ -1,6 +1,7 @@
 #include "vulkan.hpp"
 #include "nuklear_canvas.hpp"
 #include "color_wheel.hpp"
+#include "color_hex.hpp"
 #include "engine.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -37,6 +38,9 @@ struct App {
     bool settingsOpen = false;
     ColorWheel themeWheel;
     bool themeDirty = false;
+    char themeHex[8]{};
+    int themeHexLength = 7;
+    bool themeHexInvalid = false;
     const char *tr(const char *en, const char *ru) const { return russian ? ru : en; }
     std::vector<nk_byte> uiMemory;
     std::vector<char> sourceStorage;
@@ -214,6 +218,7 @@ struct App {
         ui.style.edit.text_active = nk_rgb(255, 255, 255);
         ui.style.window.scrollbar_size = nk_vec2(10, 10);
         loadTheme();
+        formatColorHex(themeWheel.color(), themeHex);
         applyTheme();
         setOutput("Ready. F5 - run, F6 - syntax check, F7 - Editor/Engine, Ctrl+S - save.\nNuklear immediate UI / fixed 4 MiB arena / Vulkan renderer.");
         initializeEngine();
@@ -277,6 +282,11 @@ struct App {
             nk_layout_row_push(&ui, 112);
             nk_label_colored(&ui, "LuaC // STUDIO", NK_TEXT_LEFT, nk_rgb(255, 255, 255));
             nk_layout_row_push(&ui, 100);
+            if (nk_button_label(&ui, tr("Settings", "Настройки"))) {
+                settingsOpen = !settingsOpen;
+                if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "settings=%s\n", settingsOpen ? "open" : "closed");
+            }
+            nk_layout_row_push(&ui, 100);
             if (nk_button_label(&ui, tr("Editor", "Редактор"))) engineMode = false;
             nk_layout_row_push(&ui, 90);
             if (nk_button_label(&ui, tr("Engine", "Движок"))) engineMode = true;
@@ -300,11 +310,6 @@ struct App {
             if (nk_button_label(&ui, engineMode ? tr("Reset", "Сброс") : "F6")) { if (engineMode) resetEngine(); else check(); }
             nk_layout_row_push(&ui, 100);
             if (nk_button_label(&ui, tr("Save", "Сохранить"))) save();
-            nk_layout_row_push(&ui, 100);
-            if (nk_button_label(&ui, tr("Settings", "Настройки"))) {
-                settingsOpen = !settingsOpen;
-                if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "settings=%s\n", settingsOpen ? "open" : "closed");
-            }
             nk_layout_row_push(&ui, std::max(40.0f, width - 920.0f));
             nk_label(&ui, filename.c_str(), NK_TEXT_RIGHT);
             nk_layout_row_end(&ui);
@@ -523,15 +528,36 @@ struct App {
             }
             nk_layout_row_dynamic(&ui, 22, 1);
             nk_label(&ui, tr("Accent color", "Цвет темы"), NK_TEXT_LEFT);
-            nk_layout_row_dynamic(&ui, 245, 1);
+            nk_layout_row_dynamic(&ui, 215, 1);
             if (themeWheel.draw(&ui)) {
                 themeDirty = true;
+                formatColorHex(themeWheel.color(), themeHex);
+                themeHexLength = 7;
+                themeHexInvalid = false;
                 applyTheme();
                 if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "theme=changed\n");
             }
+            nk_layout_row_begin(&ui, NK_DYNAMIC, 26, 2);
+            nk_layout_row_push(&ui, 0.62f);
+            nk_edit_string(&ui, NK_EDIT_FIELD, themeHex, &themeHexLength, 7, nk_filter_default);
+            themeHex[themeHexLength] = 0;
+            nk_layout_row_push(&ui, 0.38f);
+            if (nk_button_label(&ui, tr("Apply", "Применить"))) {
+                nk_color color;
+                if (parseColorHex(themeHex, themeHexLength, color)) {
+                    themeWheel.setColor(color);
+                    formatColorHex(color, themeHex);
+                    themeHexLength = 7;
+                    themeHexInvalid = false;
+                    themeDirty = true;
+                    applyTheme();
+                    if (std::getenv("LUAC_UI_TRACE")) std::fprintf(stderr, "theme=hex\n");
+                } else themeHexInvalid = true;
+            }
+            nk_layout_row_end(&ui);
             nk_layout_row_dynamic(&ui, 24, 1);
             struct nk_rect swatch = nk_widget_bounds(&ui);
-            nk_label(&ui, tr("Preview", "Образец"), NK_TEXT_LEFT);
+            nk_label(&ui, themeHexInvalid ? tr("Use #RRGGBB", "Введите #RRGGBB") : tr("Preview", "Образец"), NK_TEXT_LEFT);
             nk_fill_rect(nk_window_get_canvas(&ui), nk_rect(swatch.x + swatch.w - 60, swatch.y + 2, 54, 20), 4, themeWheel.color());
             nk_layout_row_dynamic(&ui, 26, 1);
             if (nk_button_label(&ui, tr("Close", "Закрыть"))) { saveTheme(); settingsOpen = false; }

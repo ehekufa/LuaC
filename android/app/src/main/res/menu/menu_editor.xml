@@ -4,17 +4,17 @@
         android:id="@+id/action_rename"
         app:showAsAction="ifRoom"
         android:icon="@drawable/ic_edit"
-        android:title="Rename" />
+        android:title="@string/action_rename" />
     <item
         android:id="@+id/action_check"
         android:icon="@drawable/ic_check"
-        android:title="Check syntax" />
+        android:title="@string/action_check" />
     <item
         android:id="@+id/action_generate"
         android:icon="@drawable/ic_code"
-        android:title="Generate C" />
+        android:title="@string/action_generate" />
     <item
         android:id="@+id/action_delete"
         android:icon="@drawable/ic_delete"
-        android:title="Delete" />
+        android:title="@string/action_delete" />
 </menu>

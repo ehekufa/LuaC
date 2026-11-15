@@ -1,6 +1,7 @@
 package com.luac.studio;
 
 import android.content.res.AssetManager;
+import android.content.Context;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -21,6 +22,17 @@ final class SampleCatalog {
         new Sample("love", "LÖVE-style drawing", "Draw and touch callbacks on Canvas", "scene.lua"),
         new Sample("ffi", "Native FFI", "C library calls; requires a compatible libffi", "native.lua")
     };
+    static String description(Context context, Sample sample) {
+        if (!StudioTheme.language(context).equals("ru")) return sample.description;
+        switch (sample.id) {
+            case "hello": return "Главный файл и модуль проекта";
+            case "library": return "JSON, SHA-256 и Base64";
+            case "gui": return "Сцена Canvas с касанием, без Vulkan";
+            case "love": return "Рисование и касания на Canvas";
+            case "ffi": return "Вызовы C-библиотеки; требуется совместимая libffi";
+            default: return sample.description;
+        }
+    }
     private SampleCatalog() { }
 
     static File install(AssetManager assets, ProjectStore store, Sample sample) throws IOException {

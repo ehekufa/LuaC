@@ -54,7 +54,7 @@
             android:layout_height="wrap_content"
             android:layout_marginEnd="8dp"
             android:layout_weight="1"
-            android:text="Save"
+            android:text="@string/save"
             app:icon="@drawable/ic_check" />
 
         <com.google.android.material.button.MaterialButton
@@ -62,7 +62,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Run project"
+            android:text="@string/run_project"
             app:icon="@drawable/ic_play"
             style="@style/Widget.Material3.Button.TonalButton" />
     </LinearLayout>
@@ -85,7 +85,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Console"
+                android:text="@string/console"
                 android:textColor="?attr/colorOnSurfaceVariant"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -100,7 +100,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:fontFamily="monospace"
-                    android:text="Ready. RUN executes main.lua and all its require() modules."
+                    android:text="@string/editor_ready"
                     android:textColor="?attr/colorOnSurfaceVariant"
                     android:textIsSelectable="true"
                     android:textSize="12sp" />

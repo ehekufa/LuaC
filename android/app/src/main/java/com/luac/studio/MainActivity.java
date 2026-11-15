@@ -1,6 +1,8 @@
 package com.luac.studio;
 
 import android.content.Intent;
+import android.content.Context;
+import android.content.res.Configuration;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
@@ -8,6 +10,9 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
+import android.text.Editable;
+import android.text.InputFilter;
+import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -83,6 +88,16 @@ public final class MainActivity extends AppCompatActivity {
             if (running) handler.postDelayed(this, 16);
         }
     };
+
+    @Override protected void attachBaseContext(Context base) {
+        Configuration config = new Configuration(base.getResources().getConfiguration());
+        config.setLocale(new Locale(StudioTheme.language(base)));
+        super.attachBaseContext(base.createConfigurationContext(config));
+    }
+
+    private String tr(String english, String russian) {
+        return "ru".equals(StudioTheme.language(this)) ? russian : english;
+    }
 
     @Override public void onCreate(Bundle state) {
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
@@ -175,7 +190,7 @@ public final class MainActivity extends AppCompatActivity {
             @Override public void onOpen(File item) { showProject(item); }
             @Override public void onRun(File item) { startProject(item); }
             @Override public void onRename(File item) {
-                renameDialog(item, renamed -> { showProjects(); toast("Renamed to " + renamed.getName()); });
+                renameDialog(item, renamed -> { showProjects(); toast(tr("Renamed to ", "Переименовано в ") + renamed.getName()); });
             }
             @Override public void onExport(File item) { exportProject(item); }
             @Override public void onDelete(File item) { confirmDelete(item, MainActivity.this::showProjects); }
@@ -186,10 +201,31 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void showSettings() {
-        showColorDialog("Settings · Theme color", StudioTheme.color(this), true, color -> {
-            StudioTheme.save(this, color);
-            StudioTheme.apply(getWindow().getDecorView(), color);
-        });
+        String current = StudioTheme.language(this).equals("ru") ? "Русский" : "English";
+        String[] choices = {tr("Language", "Язык") + ": " + current,
+                            tr("Theme color", "Цвет темы")};
+        new MaterialAlertDialogBuilder(this).setTitle(tr("Settings", "Настройки"))
+            .setItems(choices, (dialog, which) -> {
+                if (which == 0) showLanguageDialog();
+                else showColorDialog(tr("Theme color", "Цвет темы"), StudioTheme.color(this), true, color -> {
+                    StudioTheme.save(this, color);
+                    StudioTheme.apply(getWindow().getDecorView(), color);
+                });
+            }).setNegativeButton(tr("Close", "Закрыть"), null).show();
+    }
+
+    private void showLanguageDialog() {
+        String[] languages = {"English", "Русский"};
+        int selected = StudioTheme.language(this).equals("ru") ? 1 : 0;
+        new MaterialAlertDialogBuilder(this).setTitle(tr("Language", "Язык"))
+            .setSingleChoiceItems(languages, selected, (dialog, which) -> {
+                dialog.dismiss();
+                String language = which == 1 ? "ru" : "en";
+                if (!language.equals(StudioTheme.language(this))) {
+                    StudioTheme.saveLanguage(this, language);
+                    recreate();
+                }
+            }).setNegativeButton(tr("Cancel", "Отмена"), null).show();
     }
 
     private void showColorDialog(String title, int initial, boolean reset, IntConsumer onApply) {
@@ -199,39 +235,76 @@ public final class MainActivity extends AppCompatActivity {
         content.setPadding(padding, 0, padding, padding);
         ColorWheelView wheel = new ColorWheelView(this, initial);
         content.addView(wheel, new LinearLayout.LayoutParams(-1, -2));
+        EditText hex = new EditText(this);
+        hex.setSingleLine(true);
+        hex.setTextColor(Color.WHITE);
+        hex.setHintTextColor(Color.WHITE);
+        hex.setHint("#RRGGBB");
+        hex.setContentDescription(tr("Hex color", "Цвет в HEX"));
+        hex.setFilters(new InputFilter[] {new InputFilter.LengthFilter(7)});
+        hex.setText(ColorHex.format(initial));
+        content.addView(hex, new LinearLayout.LayoutParams(-1, -2));
         TextView preview = new TextView(this);
         preview.setTextColor(Color.WHITE);
         preview.setPadding(padding, padding / 2, padding, padding / 2);
         content.addView(preview, new LinearLayout.LayoutParams(-1, -2));
         IntConsumer update = color -> {
-            preview.setText(String.format(Locale.ROOT, "#%06X", color & 0xffffff));
+            preview.setText(ColorHex.format(color));
             preview.setBackgroundColor(StudioTheme.dark(color));
         };
         update.accept(initial);
-        wheel.setListener(update::accept);
+        final boolean[] updating = {false};
+        wheel.setListener(color -> {
+            updating[0] = true;
+            hex.setText(ColorHex.format(color));
+            hex.setSelection(hex.length());
+            hex.setError(null);
+            updating[0] = false;
+            update.accept(color);
+        });
+        hex.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                if (updating[0]) return;
+                Integer color = ColorHex.parse(s.toString());
+                if (color != null) { hex.setError(null); wheel.setColor(color); update.accept(color); }
+            }
+            @Override public void afterTextChanged(Editable value) { }
+        });
         ScrollView scroll = new ScrollView(this);
         scroll.addView(content);
-        MaterialAlertDialogBuilder dialog = new MaterialAlertDialogBuilder(this)
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this)
             .setTitle(title).setView(scroll)
-            .setPositiveButton("Apply", (d, which) -> onApply.accept(wheel.getColor()))
-            .setNegativeButton("Cancel", null);
-        if (reset) dialog.setNeutralButton("Default", (d, which) -> onApply.accept(StudioTheme.defaultColor()));
+            .setPositiveButton(tr("Apply", "Применить"), null)
+            .setNegativeButton(tr("Cancel", "Отмена"), null);
+        if (reset) builder.setNeutralButton(tr("Default", "По умолчанию"), (d, which) -> onApply.accept(StudioTheme.defaultColor()));
+        androidx.appcompat.app.AlertDialog dialog = builder.create();
+        dialog.setOnShowListener(unused -> dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            Integer color = ColorHex.parse(hex.getText().toString());
+            if (color == null) {
+                hex.setError(tr("Use six hex digits, for example #FF8040", "Введите шесть HEX-цифр, например #FF8040"));
+                hex.requestFocus();
+                return;
+            }
+            onApply.accept(color);
+            dialog.dismiss();
+        }));
         dialog.show();
     }
 
     private void showSamples() {
         showingSamples = true;
         MaterialToolbar bar = toolbar(R.layout.screen_samples);
-        bar.setTitle("Пакеты");
-        bar.setSubtitle("Examples • create an editable copy");
+        bar.setTitle(tr("Packages", "Пакеты"));
+        bar.setSubtitle(tr("Examples • create an editable copy", "Примеры • создайте копию для редактирования"));
         back(bar, this::showProjects);
         LinearLayout list = findViewById(R.id.samples);
         for (SampleCatalog.Sample sample : SampleCatalog.SAMPLES) {
             View card = LayoutInflater.from(this).inflate(R.layout.item_project, list, false);
             ((TextView) card.findViewById(R.id.name)).setText(sample.name);
-            ((TextView) card.findViewById(R.id.subtitle)).setText(sample.description);
+            ((TextView) card.findViewById(R.id.subtitle)).setText(SampleCatalog.description(this, sample));
             MaterialButton create = card.findViewById(R.id.run);
-            create.setText("Create");
+            create.setText(tr("Create", "Создать"));
             create.setIcon(null);
             card.findViewById(R.id.more).setVisibility(View.GONE);
             View.OnClickListener install = v -> {
@@ -245,7 +318,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void newProjectDialog() {
-        nameDialog("New project", "", "Project name", "Create", name -> {
+        nameDialog(tr("New project", "Новый проект"), "", "Project name", tr("Create", "Создать"), name -> {
             try { showProject(store.createProject(name)); }
             catch (Exception error) { toast(error); }
         });
@@ -261,15 +334,15 @@ public final class MainActivity extends AppCompatActivity {
         MaterialToolbar bar = toolbar(R.layout.screen_files);
         bar.setTitle(project.getName());
         String path = relative(selected);
-        bar.setSubtitle(path.isEmpty() ? "Project files" : path);
+        bar.setSubtitle(path.isEmpty() ? tr("Project files", "Файлы проекта") : path);
         back(bar, this::onBackPressed);
         bar.inflateMenu(R.menu.menu_files);
         bar.setOnMenuItemClickListener(item -> {
             if (item.getItemId() == R.id.action_run) startProject(project);
-            else if (item.getItemId() == R.id.action_add_file) nameDialog("New file", "", "script.lua", "Create", name -> {
+            else if (item.getItemId() == R.id.action_add_file) nameDialog(tr("New file", "Новый файл"), "", "script.lua", tr("Create", "Создать"), name -> {
                 try { showEditor(store.createFile(directory, name)); } catch (Exception error) { toast(error); }
             });
-            else if (item.getItemId() == R.id.action_add_folder) nameDialog("New folder", "", "scripts", "Create", name -> {
+            else if (item.getItemId() == R.id.action_add_folder) nameDialog(tr("New folder", "Новая папка"), "", "scripts", tr("Create", "Создать"), name -> {
                 try { store.createFolder(directory, name); showDirectory(directory); } catch (Exception error) { toast(error); }
             });
             else if (item.getItemId() == R.id.action_import) pickAsset();
@@ -283,7 +356,7 @@ public final class MainActivity extends AppCompatActivity {
         FileAdapter adapter = new FileAdapter(store.children(directory), new FileAdapter.Listener() {
             @Override public void onOpen(File file) { openFile(file); }
             @Override public void onRename(File file) {
-                renameDialog(file, renamed -> { showDirectory(directory); toast("Renamed to " + renamed.getName()); });
+                renameDialog(file, renamed -> { showDirectory(directory); toast(tr("Renamed to ", "Переименовано в ") + renamed.getName()); });
             }
             @Override public void onDelete(File file) { confirmDelete(file, () -> showDirectory(directory)); }
         });
@@ -295,22 +368,22 @@ public final class MainActivity extends AppCompatActivity {
         editorFile = imageFile = null;
         MaterialToolbar bar = toolbar(R.layout.screen_paint);
         bar.setTitle("Paint");
-        bar.setSubtitle("512 × 512 • transparent PNG");
+        bar.setSubtitle(tr("512 × 512 • transparent PNG", "512 × 512 • прозрачный PNG"));
         back(bar, this::leavePaint);
         paintView = new PaintView(this);
         FrameLayout canvas = findViewById(R.id.paint_canvas);
         canvas.addView(paintView, new FrameLayout.LayoutParams(-1, -1));
         MaterialButton colorButton = findViewById(R.id.paint_color);
-        colorButton.setOnClickListener(v -> showColorDialog("Brush color", paintView.getBrushColor(), false, color -> {
+        colorButton.setOnClickListener(v -> showColorDialog(tr("Brush color", "Цвет кисти"), paintView.getBrushColor(), false, color -> {
             paintView.setBrushColor(color);
-            colorButton.setText(String.format(Locale.ROOT, "Color #%06X", color & 0xffffff));
+            colorButton.setText(tr("Color ", "Цвет ") + ColorHex.format(color));
         }));
-        findViewById(R.id.paint_eraser).setOnClickListener(v -> { paintView.setEraser(); toast("Eraser"); });
+        findViewById(R.id.paint_eraser).setOnClickListener(v -> { paintView.setEraser(); toast(tr("Eraser", "Ластик")); });
         findViewById(R.id.paint_undo).setOnClickListener(v -> paintView.undo());
         findViewById(R.id.paint_clear).setOnClickListener(v ->
-            new MaterialAlertDialogBuilder(this).setTitle("Clear the drawing?")
-                .setPositiveButton("Clear", (dialog, which) -> paintView.clear())
-                .setNegativeButton("Cancel", null).show());
+            new MaterialAlertDialogBuilder(this).setTitle(tr("Clear the drawing?", "Очистить рисунок?"))
+                .setPositiveButton(tr("Clear", "Очистить"), (dialog, which) -> paintView.clear())
+                .setNegativeButton(tr("Cancel", "Отмена"), null).show());
         findViewById(R.id.paint_save).setOnClickListener(v -> savePainting());
         SeekBar size = findViewById(R.id.paint_size);
         size.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -321,21 +394,21 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void savePainting() {
-        nameDialog("Save image to assets", "drawing.png", "drawing.png", "Save", name -> {
+        nameDialog(tr("Save image to assets", "Сохранить рисунок в assets"), "drawing.png", "drawing.png", tr("Save", "Сохранить"), name -> {
             try {
                 File saved = store.savePainting(project, name, output -> paintView.writePng(output));
                 paintView.markSaved();
-                toast("Saved " + relative(saved));
+                toast(tr("Saved ", "Сохранено: ") + relative(saved));
             } catch (Exception error) { toast(error); }
         });
     }
 
     private void leavePaint() {
         if (paintView != null && paintView.hasUnsavedChanges()) {
-            new MaterialAlertDialogBuilder(this).setTitle("Discard unsaved drawing?")
-                .setMessage("Save the image to assets before leaving, or discard your changes.")
-                .setPositiveButton("Discard", (dialog, which) -> showDirectory(directory))
-                .setNegativeButton("Keep drawing", null).show();
+            new MaterialAlertDialogBuilder(this).setTitle(tr("Discard unsaved drawing?", "Отменить несохранённый рисунок?"))
+                .setMessage(tr("Save the image to assets before leaving, or discard your changes.", "Сохраните рисунок в assets или отмените изменения."))
+                .setPositiveButton(tr("Discard", "Отменить изменения"), (dialog, which) -> showDirectory(directory))
+                .setNegativeButton(tr("Keep drawing", "Продолжить рисовать"), null).show();
         } else showDirectory(directory);
     }
 
@@ -388,7 +461,7 @@ public final class MainActivity extends AppCompatActivity {
         editor = findViewById(R.id.editor);
         try { editor.setText(store.read(file)); } catch (Exception error) { toast(error); showDirectory(directory); return; }
         MaterialButton save = findViewById(R.id.save);
-        save.setOnClickListener(v -> { if (saveEditor()) toast("Saved"); });
+        save.setOnClickListener(v -> { if (saveEditor()) toast(tr("Saved", "Сохранено")); });
         MaterialButton run = findViewById(R.id.run);
         run.setOnClickListener(v -> { if (saveEditor()) startProject(project); });
         output = findViewById(R.id.output);
@@ -403,7 +476,7 @@ public final class MainActivity extends AppCompatActivity {
             MaterialToolbar bar = findViewById(R.id.toolbar);
             bar.setTitle(renamed.getName());
             bar.setSubtitle(relative(renamed));
-            toast("Renamed to " + renamed.getName());
+            toast(tr("Renamed to ", "Переименовано в ") + renamed.getName());
         });
     }
 
@@ -422,12 +495,12 @@ public final class MainActivity extends AppCompatActivity {
         if (opening) return;
         stopRuntime();
         project = selected;
-        if (!new File(selected, "main.lua").isFile()) { toast("main.lua is missing"); return; }
+        if (!new File(selected, "main.lua").isFile()) { toast(tr("main.lua is missing", "Файл main.lua не найден")); return; }
         if (!nativeAvailable) { toast("Native library unavailable: " + nativeLoadError); return; }
         opening = true;
         MaterialToolbar bar = toolbar(R.layout.screen_runtime);
-        bar.setTitle("Starting " + selected.getName() + "…");
-        bar.setSubtitle("Loading main.lua, modules and textures");
+        bar.setTitle(tr("Starting ", "Запуск: ") + selected.getName() + "…");
+        bar.setSubtitle(tr("Loading main.lua, modules and textures", "Загрузка main.lua, модулей и текстур"));
         new Thread(() -> {
             String result;
             try { result = nativeOpenProject(selected.getAbsolutePath()); }
@@ -438,7 +511,7 @@ public final class MainActivity extends AppCompatActivity {
                 if (destroyed) { try { nativeCloseProject(); } catch (Throwable ignored) { } return; }
                 try { showRuntime(selected, new JSONObject(completed)); }
                 catch (Exception error) {
-                    new MaterialAlertDialogBuilder(this).setTitle("Project could not start").setMessage(completed)
+                    new MaterialAlertDialogBuilder(this).setTitle(tr("Project could not start", "Не удалось запустить проект")).setMessage(completed)
                         .setPositiveButton("OK", (dialog, which) -> showProject(selected)).show();
                 }
             });
@@ -451,7 +524,7 @@ public final class MainActivity extends AppCompatActivity {
         runtimeError = false;
         MaterialToolbar bar = toolbar(R.layout.screen_runtime);
         bar.setTitle(selected.getName());
-        bar.setSubtitle("Running • touch the scene");
+        bar.setSubtitle(tr("Running • touch the scene", "Запущено • коснитесь сцены"));
         bar.inflateMenu(R.menu.menu_runtime);
         bar.setOnMenuItemClickListener(item -> {
             if (item.getItemId() == R.id.action_stop) showProject(selected);
@@ -499,21 +572,21 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void chooseApkDestination(File selected) {
-        if (!new File(selected, "main.lua").isFile()) { toast("main.lua is missing"); return; }
-        new MaterialAlertDialogBuilder(this).setTitle("Build standalone APK")
-            .setMessage("The APK contains the project and LuaC runtime. Each project has its own app ID, stored in .luac/android-id. The signing key stays on this device; reinstalling Studio can prevent updates to previously built APKs.")
-            .setPositiveButton("Choose destination", (dialog, which) -> {
+        if (!new File(selected, "main.lua").isFile()) { toast(tr("main.lua is missing", "Файл main.lua не найден")); return; }
+        new MaterialAlertDialogBuilder(this).setTitle(tr("Build standalone APK", "Собрать отдельный APK"))
+            .setMessage(tr("The APK contains the project and LuaC runtime. Each project has its own app ID, stored in .luac/android-id. The signing key stays on this device; reinstalling Studio can prevent updates to previously built APKs.", "APK содержит проект и LuaC runtime. ID приложения хранится в .luac/android-id. Ключ подписи остаётся на устройстве; после переустановки Studio обновить старый APK может не получиться."))
+            .setPositiveButton(tr("Choose destination", "Выбрать место"), (dialog, which) -> {
                 apkProject = selected;
                 Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
                 intent.setType("application/vnd.android.package-archive");
                 intent.putExtra(Intent.EXTRA_TITLE, selected.getName() + ".apk");
                 startActivityForResult(intent, BUILD_APK);
-            }).setNegativeButton("Cancel", null).show();
+            }).setNegativeButton(tr("Cancel", "Отмена"), null).show();
     }
 
     private void buildApk(Uri destination, File selected) {
-        toast("Building and signing APK…");
+        toast(tr("Building and signing APK…", "Сборка и подпись APK…"));
         new Thread(() -> {
             File unsigned = null, signed = null;
             try {
@@ -533,7 +606,7 @@ public final class MainActivity extends AppCompatActivity {
                     int count;
                     while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
                 }
-                handler.post(() -> { if (!destroyed) toast("Signed project APK saved"); });
+                handler.post(() -> { if (!destroyed) toast(tr("Signed project APK saved", "Подписанный APK проекта сохранён")); });
             } catch (Exception error) {
                 handler.post(() -> { if (!destroyed) toast(error); });
             } finally {
@@ -565,7 +638,7 @@ public final class MainActivity extends AppCompatActivity {
             try (InputStream input = getContentResolver().openInputStream(uri)) {
                 if (input == null) throw new IOException("Cannot open selected project");
                 File imported = store.importProject(input);
-                handler.post(() -> { if (!destroyed) { showProject(imported); toast("Imported " + imported.getName()); } });
+                handler.post(() -> { if (!destroyed) { showProject(imported); toast(tr("Imported ", "Импортировано: ") + imported.getName()); } });
             } catch (Exception error) {
                 handler.post(() -> { if (!destroyed) toast(error); });
             }
@@ -582,7 +655,7 @@ public final class MainActivity extends AppCompatActivity {
                     archive.writeTo(output);
                     output.flush();
                 }
-                handler.post(() -> { if (!destroyed) toast("Project exported as .luac"); });
+                handler.post(() -> { if (!destroyed) toast(tr("Project exported as .luac", "Проект экспортирован в .luac")); });
             } catch (Exception error) {
                 handler.post(() -> { if (!destroyed) toast(error); });
             }
@@ -621,7 +694,7 @@ public final class MainActivity extends AppCompatActivity {
         Uri uri = data.getData();
         try (InputStream input = getContentResolver().openInputStream(uri)) {
             File imported = store.importFile(importDirectory, displayName(uri), input);
-            toast("Imported " + imported.getName());
+            toast(tr("Imported ", "Импортировано: ") + imported.getName());
             showDirectory(importDirectory);
         } catch (Exception error) { toast(error); }
     }
@@ -643,14 +716,16 @@ public final class MainActivity extends AppCompatActivity {
         if (!initial.isEmpty()) { input.setSelection(initial.length()); }
         new MaterialAlertDialogBuilder(this).setTitle(title).setView(view)
             .setPositiveButton(positive, (dialog, which) -> action.run(input.getText().toString()))
-            .setNegativeButton("Cancel", null).show();
+            .setNegativeButton(tr("Cancel", "Отмена"), null).show();
     }
     private void renameDialog(File file, RenameAction after) {
-        String title = file.getName().equals("main.lua") ? "Rename entry point (main.lua is required to run)" : "Rename (references are not updated)";
-        nameDialog(title, file.getName(), file.getName(), "Rename", name -> {
+        String title = file.getName().equals("main.lua")
+            ? tr("Rename entry point (main.lua is required to run)", "Переименовать точку входа (для запуска нужен main.lua)")
+            : tr("Rename (references are not updated)", "Переименовать (пути не обновляются)");
+        nameDialog(title, file.getName(), file.getName(), tr("Rename", "Переименовать"), name -> {
             try {
                 File renamed = store.rename(file, name);
-                if (renamed.equals(file)) { toast("Name unchanged"); return; }
+                if (renamed.equals(file)) { toast(tr("Name unchanged", "Имя не изменилось")); return; }
                 after.run(renamed);
             } catch (Exception error) { toast(error); }
         });
@@ -659,11 +734,11 @@ public final class MainActivity extends AppCompatActivity {
     private interface RenameAction { void run(File renamed); }
 
     private void confirmDelete(File file, Runnable after) {
-        new MaterialAlertDialogBuilder(this).setTitle("Delete " + file.getName() + "?")
-            .setMessage(file.isDirectory() ? "The folder and everything inside it will be deleted." : "This cannot be undone.")
-            .setPositiveButton("Delete", (dialog, which) -> {
+        new MaterialAlertDialogBuilder(this).setTitle(tr("Delete ", "Удалить ") + file.getName() + "?")
+            .setMessage(file.isDirectory() ? tr("The folder and everything inside it will be deleted.", "Папка и всё её содержимое будут удалены.") : tr("This cannot be undone.", "Это действие нельзя отменить."))
+            .setPositiveButton(tr("Delete", "Удалить"), (dialog, which) -> {
                 try { store.delete(file); after.run(); } catch (Exception error) { toast(error); }
-            }).setNegativeButton("Cancel", null).show();
+            }).setNegativeButton(tr("Cancel", "Отмена"), null).show();
     }
 
     @Override public void onBackPressed() {

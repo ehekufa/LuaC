@@ -6,11 +6,12 @@
 /* A hue ring with saturation/value in the centre. */
 class ColorWheel {
 public:
-    explicit ColorWheel(nk_color initial = nk_rgb(75, 220, 181)) {
-        nk_color_hsv_f(&hue_, &saturation_, &value_, initial);
+    explicit ColorWheel(nk_color initial = nk_rgb(75, 220, 181)) { setColor(initial); }
+    nk_color color() const { return color_; }
+    void setColor(nk_color color) {
+        color_ = color;
+        nk_color_hsv_f(&hue_, &saturation_, &value_, color);
     }
-    nk_color color() const { return nk_hsv_f(hue_, saturation_, value_); }
-    void setColor(nk_color color) { nk_color_hsv_f(&hue_, &saturation_, &value_, color); }
 
     bool draw(nk_context *ui) {
         struct nk_rect area;
@@ -40,6 +41,7 @@ public:
             float v = std::clamp(1.0f - (input.mouse.pos.y - top) / square, 0.0f, 1.0f);
             changed = saturation_ != s || value_ != v; saturation_ = s; value_ = v;
         }
+        if (changed) color_ = nk_hsv_f(hue_, saturation_, value_);
         nk_command_buffer *out = nk_window_get_canvas(ui);
         const int segments = 96;
         for (int i = 0; i < segments; ++i) {
@@ -66,4 +68,5 @@ public:
 private:
     enum Drag { None, Ring, Square } dragging_ = None;
     float hue_ = 0, saturation_ = 1, value_ = 1;
+    nk_color color_{};
 };

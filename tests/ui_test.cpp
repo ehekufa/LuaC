@@ -1,5 +1,6 @@
 #include "nuklear_canvas.hpp"
 #include "color_wheel.hpp"
+#include "color_hex.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -46,6 +47,17 @@ bool frame(nk_context &ui, NuklearCanvas &canvas, bool &clicked, char *source, i
 }
 
 int main() {
+    nk_color parsed = nk_rgb(1, 2, 3);
+    assert(parseColorHex("#FF8040", 7, parsed));
+    assert(parsed.r == 255 && parsed.g == 128 && parsed.b == 64);
+    assert(parseColorHex("a0b1c2", 6, parsed));
+    assert(parsed.r == 160 && parsed.g == 177 && parsed.b == 194);
+    assert(!parseColorHex("#12XZ00", 7, parsed));
+    assert(!parseColorHex("#123", 4, parsed));
+    char formatted[8]; formatColorHex(parsed, formatted);
+    assert(std::string(formatted) == "#A0B1C2");
+    ColorWheel exact(parsed);
+    assert(exact.color().r == 160 && exact.color().g == 177 && exact.color().b == 194);
     std::vector<nk_byte> arena(512 * 1024);
     nk_context ui{};
     NuklearCanvas canvas;

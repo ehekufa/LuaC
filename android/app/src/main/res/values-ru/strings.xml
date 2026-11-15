@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="action_export_archive">Экспорт .luac</string>
+    <string name="action_import_archive">Импорт .luac</string>
+    <string name="action_rename">Переименовать</string>
+    <string name="action_delete">Удалить</string>
+    <string name="action_samples">Пакеты</string>
+    <string name="action_settings">Настройки</string>
+    <string name="action_stop_edit">Остановить и открыть редактор</string>
+    <string name="action_run">Запуск</string>
+    <string name="action_new_file">Новый файл</string>
+    <string name="action_new_folder">Новая папка</string>
+    <string name="action_import_asset">Импорт ресурса</string>
+    <string name="action_build_apk">Собрать APK проекта</string>
+    <string name="action_paint">Paint — новый рисунок</string>
+    <string name="action_export_project">Экспорт проекта (.luac)</string>
+    <string name="action_check">Проверить синтаксис</string>
+    <string name="action_generate">Создать C</string>
+    <string name="paint_color">Цвет</string>
+    <string name="paint_eraser">Ластик</string>
+    <string name="paint_undo">Отменить</string>
+    <string name="paint_clear">Очистить</string>
+    <string name="paint_save">Сохранить PNG</string>
+    <string name="paint_size">Размер кисти</string>
+    <string name="console">Консоль</string>
+    <string name="new_project">Новый проект</string>
+    <string name="save">Сохранить</string>
+    <string name="run_project">Запустить проект</string>
+    <string name="more_options">Дополнительные действия</string>
+    <string name="editor_ready">Готово. RUN запускает main.lua и все его модули require().</string>
+</resources>

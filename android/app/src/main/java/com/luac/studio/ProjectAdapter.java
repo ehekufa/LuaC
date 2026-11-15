@@ -44,7 +44,9 @@ final class ProjectAdapter extends RecyclerView.Adapter<ProjectAdapter.Holder> {
         File project = items.get(position);
         holder.name.setText(project.getName());
         int count = store.fileCount(project);
-        holder.subtitle.setText(count + (count == 1 ? " file" : " files") + " • Lua project");
+        holder.subtitle.setText(StudioTheme.language(holder.itemView.getContext()).equals("ru")
+            ? "Файлов: " + count + " • проект Lua"
+            : count + (count == 1 ? " file" : " files") + " • Lua project");
         holder.card.setOnClickListener(v -> listener.onOpen(project));
         holder.run.setOnClickListener(v -> listener.onRun(project));
         holder.more.setOnClickListener(v -> {

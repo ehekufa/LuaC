@@ -13,6 +13,12 @@ final class StudioTheme {
     private static final String PREFS = "studio-settings";
     private static final int DEFAULT = 0xff4bdcb5;
     private StudioTheme() { }
+    static String language(Context context) {
+        return "ru".equals(context.getSharedPreferences(PREFS, 0).getString("language", "en")) ? "ru" : "en";
+    }
+    static void saveLanguage(Context context, String language) {
+        context.getSharedPreferences(PREFS, 0).edit().putString("language", "ru".equals(language) ? "ru" : "en").apply();
+    }
     static int color(Context context) { return context.getSharedPreferences(PREFS, 0).getInt("accent", DEFAULT); }
     static void save(Context context, int color) { context.getSharedPreferences(PREFS, 0).edit().putInt("accent", color | 0xff000000).apply(); }
     static int defaultColor() { return DEFAULT; }
