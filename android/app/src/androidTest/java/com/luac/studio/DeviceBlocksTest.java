@@ -48,7 +48,8 @@ public class DeviceBlocksTest {
             assertTrue(saved.contains("print(\"block output\")"));
             assertTrue(saved.endsWith(original));
             assertEquals(1, BlockProgram.open(saved).blocks.length());
-            onView(withId(R.id.run)).perform(click());
+            // The running scene renders continuously, so Espresso cannot wait for an idle frame.
+            activity.onActivity(screen -> screen.findViewById(R.id.run).performClick());
             final String[] output = {""};
             for (int i = 0; i < 40; i++) {
                 activity.onActivity(screen -> { TextView view = screen.findViewById(R.id.output); if (view != null) output[0] = view.getText().toString(); });
@@ -56,7 +57,7 @@ public class DeviceBlocksTest {
                 Thread.sleep(500);
             }
             assertTrue(output[0], output[0].contains("block output") && output[0].contains("existing script"));
-            pressBack();
+            activity.onActivity(MainActivity::onBackPressed);
             onView(withText("main.lua")).perform(click());
             onView(withText("Print: block output")).check(matches(isDisplayed()));
             pressBack(); pressBack();
