@@ -231,6 +231,17 @@ public final class Studio extends JFrame {
         return home.resolve("LuaC").resolve("projects");
     }
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> { try { new Studio(projectsRoot(), appHome()).setVisible(true); } catch (Exception e) { e.printStackTrace(); JOptionPane.showMessageDialog(null, e.toString(), "LuaC Studio", JOptionPane.ERROR_MESSAGE); } });
+        SwingUtilities.invokeLater(() -> {
+            try {
+                Path home = appHome();
+                Studio studio = new Studio(projectsRoot(), home);
+                studio.setVisible(true);
+                // Used by the package test to check the real launcher and its home.
+                if (args.length == 2 && args[0].equals("--launcher-test")) {
+                    if (!studio.isShowing()) throw new IOException("Window was not shown");
+                    Files.writeString(Paths.get(args[1]), home.toAbsolutePath().normalize().toString());
+                }
+            } catch (Exception e) { e.printStackTrace(); JOptionPane.showMessageDialog(null, e.toString(), "LuaC Studio", JOptionPane.ERROR_MESSAGE); }
+        });
     }
 }

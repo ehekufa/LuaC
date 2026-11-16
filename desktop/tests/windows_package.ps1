@@ -24,10 +24,18 @@ $exitCode = $LASTEXITCODE
 $results | ForEach-Object { Write-Output "$_" }
 if ($exitCode -ne 0) { throw "Packaged GUI/native compiler test failed: $($results -join ' ')" }
 # Also test the actual double-clickable launcher, independently of system Java.
-$proc = Start-Process -FilePath (Join-Path $appDir 'LuaC-Studio.exe') -PassThru
+$marker = Join-Path $work 'launcher-ready.txt'
+$stdout = Join-Path $work 'launcher-stdout.txt'
+$stderr = Join-Path $work 'launcher-stderr.txt'
+$proc = Start-Process -FilePath (Join-Path $appDir 'LuaC-Studio.exe') -ArgumentList @('--launcher-test', "`"$marker`"") -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 try {
     $deadline = (Get-Date).AddSeconds(30)
-    do { Start-Sleep -Milliseconds 500; $proc.Refresh() } while (!$proc.HasExited -and $proc.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
-    if ($proc.HasExited -or $proc.MainWindowHandle -eq 0) { throw 'Packaged Java launcher did not open a window' }
+    do { Start-Sleep -Milliseconds 500; $proc.Refresh() } while (!$proc.HasExited -and !(Test-Path $marker) -and (Get-Date) -lt $deadline)
+    if (!(Test-Path $marker)) {
+        $detail = (Get-Content $stderr -ErrorAction SilentlyContinue) -join ' '
+        throw "Packaged launcher failed; exited=$($proc.HasExited), stderr=$detail"
+    }
+    $resolved = (Get-Content $marker -Raw).Trim()
+    if ($resolved -ne $appDir) { throw "Launcher chose wrong application directory: $resolved (expected $appDir)" }
     Write-Output 'Extracted Java launcher window and bundled GCC: OK'
 } finally { if (!$proc.HasExited) { $proc.Kill(); $proc.WaitForExit() } }
