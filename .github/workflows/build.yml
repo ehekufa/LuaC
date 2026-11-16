@@ -314,12 +314,18 @@ jobs:
       - name: Vulkan and GLFW dependencies
         run: sudo apt-get update && sudo apt-get install -y libglfw3-dev libvulkan-dev glslang-tools pkg-config xvfb xauth xdotool xclip mesa-vulkan-drivers
       - run: make -j2 all gui
+      - name: Desktop project store tests
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Igui tests/project_store_test.cpp -o build/project-store-test
+          ./build/project-store-test
       - name: Verify Vulkan orientation and clipping
         run: |
           g++ -std=c++17 -O1 -Igui -Isrc tests/vulkan_orientation.cpp gui/vulkan.cpp -o build/vulkan-orientation $(pkg-config --cflags --libs glfw3 vulkan)
           xvfb-run -a ./tests/vulkan_orientation.sh
       - name: Vulkan Studio clipboard smoke
         run: xvfb-run -a ./tests/studio_smoke.sh
+      - name: Vulkan Studio projects smoke
+        run: xvfb-run -a ./tests/studio_projects_smoke.sh
       - name: Package
         run: |
           mkdir -p dist/studio-linux/build
