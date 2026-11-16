@@ -208,6 +208,39 @@ final class ProjectStore {
         return destination;
     }
 
+    File importSceneLook(File project, InputStream input) throws IOException {
+        if (project == null || project.getParentFile() == null ||
+            !project.getParentFile().getCanonicalFile().equals(root.getCanonicalFile()) || !SceneProject.isScene(project))
+            throw new IOException("Invalid scene project");
+        if (input == null) throw new IOException("Cannot open selected image");
+        File assets = resolve(project, "assets");
+        if (!assets.isDirectory() && !assets.mkdirs()) throw new IOException("Cannot create assets folder");
+        File temp = File.createTempFile(".look-", ".tmp", assets);
+        try {
+            byte[] signature = new byte[8];
+            int signatureLength = 0, total = 0, count;
+            byte[] buffer = new byte[16384];
+            try (OutputStream out = new FileOutputStream(temp)) {
+                while ((count = input.read(buffer)) != -1) {
+                    if (count == 0) continue;
+                    if (count > 8 * 1024 * 1024 - total) throw new IOException("Image exceeds 8 MiB");
+                    int take = Math.min(count, signature.length - signatureLength);
+                    System.arraycopy(buffer, 0, signature, signatureLength, take);
+                    signatureLength += take; total += count;
+                    out.write(buffer, 0, count);
+                }
+            }
+            boolean png = signatureLength == 8 && java.util.Arrays.equals(signature,
+                new byte[] {(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a});
+            boolean jpeg = signatureLength >= 3 && (signature[0] & 255) == 255 &&
+                (signature[1] & 255) == 216 && (signature[2] & 255) == 255;
+            if (!png && !jpeg) throw new IOException("Only PNG and JPEG images are supported");
+            File destination = unique(assets, "look-" + java.util.UUID.randomUUID() + (png ? ".png" : ".jpg"));
+            Files.move(temp.toPath(), destination.toPath());
+            return destination;
+        } finally { Files.deleteIfExists(temp.toPath()); }
+    }
+
     File importFile(File directory, String requested, InputStream input) throws IOException {
         String name = safeName(requested, "asset.bin");
         if (!directory.exists() && !directory.mkdirs()) throw new IOException("Cannot create assets folder");

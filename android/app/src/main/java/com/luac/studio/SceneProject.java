@@ -177,16 +177,18 @@ final class SceneProject {
         return out.toString();
     }
     private void save() throws IOException {
-        File target = new File(project, "scene.lua");
-        if (!store.read(target).equals(loaded)) throw new IOException("Scene changed on disk; reopen it before editing");
-        File temp = File.createTempFile(".scene-", ".tmp", project);
-        try {
-            String next = render();
-            store.write(temp, next);
-            try { Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); }
-            catch (AtomicMoveNotSupportedException error) { Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING); }
-            loaded = next;
-        } catch (JSONException error) { throw new IOException("Cannot save scene", error); }
-        finally { Files.deleteIfExists(temp.toPath()); }
+        synchronized (SceneProject.class) {
+            File target = new File(project, "scene.lua");
+            if (!store.read(target).equals(loaded)) throw new IOException("Scene changed on disk; reopen it before editing");
+            File temp = File.createTempFile(".scene-", ".tmp", project);
+            try {
+                String next = render();
+                store.write(temp, next);
+                try { Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); }
+                catch (AtomicMoveNotSupportedException error) { Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING); }
+                loaded = next;
+            } catch (JSONException error) { throw new IOException("Cannot save scene", error); }
+            finally { Files.deleteIfExists(temp.toPath()); }
+        }
     }
 }

@@ -53,6 +53,23 @@ public class SceneProjectTest {
         assertEquals(lua, store.read(script));
     }
 
+    @Test public void importedLooksHaveSafeNamesAndBoundedSize() throws Exception {
+        ProjectStore store = new ProjectStore(temporary.newFolder("projects"));
+        File project = store.createSceneProject("Images");
+        byte[] png = {(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0};
+        File image = store.importSceneLook(project, new ByteArrayInputStream(png));
+        assertTrue(image.getName().endsWith(".png"));
+        assertArrayEquals(png, Files.readAllBytes(image.toPath()));
+        int count = store.children(new File(project, "assets")).size();
+        for (byte[] invalid : new byte[][] {new byte[] {1, 2, 3}, new byte[8 * 1024 * 1024 + 1]}) {
+            try { store.importSceneLook(project, new ByteArrayInputStream(invalid)); fail("invalid image"); }
+            catch (IOException expected) { }
+            assertEquals(count, store.children(new File(project, "assets")).size());
+        }
+        try { store.importSceneLook(temporary.newFolder("outside"), new ByteArrayInputStream(png)); fail("outside"); }
+        catch (IOException expected) { }
+    }
+
     @Test public void editsAreNotOverwrittenAndInvalidImagesAreRejected() throws Exception {
         ProjectStore store = new ProjectStore(temporary.newFolder("projects"));
         File project = store.createSceneProject("Scene");

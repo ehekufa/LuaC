@@ -47,6 +47,7 @@ public final class MainActivity extends AppCompatActivity {
     private static final int IMPORT_PROJECT = 42;
     private static final int EXPORT_PROJECT = 43;
     private static final int BUILD_APK = 44;
+    private static final int PICK_LOOK = 45;
 
     private static boolean nativeAvailable;
     private static String nativeLoadError = "";
@@ -71,8 +72,10 @@ public final class MainActivity extends AppCompatActivity {
     private File project, directory, editorFile, imageFile, importDirectory, exportProject, apkProject;
     private EditText editor;
     private BlockProgram blockProgram;
-    private String scenePage, sceneEditorReturn;
+    private String scenePage, sceneObject, sceneEditorReturn;
     private boolean sceneFilesReturn;
+    private File pendingLookProject;
+    private String pendingLookId;
     private TextView output;
     private RuntimeView runtimeView;
     private PaintView paintView;
@@ -114,6 +117,18 @@ public final class MainActivity extends AppCompatActivity {
             if (pending != null) exportProject = new File(pending);
             String apkPending = state.getString("apkProject");
             if (apkPending != null) apkProject = new File(apkPending);
+            String lookProject = state.getString("lookProject"), lookId = state.getString("lookId");
+            if (lookProject != null && lookId != null) {
+                try {
+                    File restored = new File(lookProject);
+                    if (!restored.isDirectory() || !restored.getParentFile().getCanonicalFile().equals(store.root.getCanonicalFile()))
+                        throw new IOException("Cannot restore image selection");
+                    SceneProject savedScene = SceneProject.open(store, restored);
+                    if (!lookId.equals("background")) savedScene.actor(lookId);
+                    project = pendingLookProject = restored; pendingLookId = lookId;
+                    showSceneObject(lookId);
+                } catch (Exception error) { toast(error); }
+            }
             String paintProject = state.getString("paintProject"), draft = state.getString("paintDraft");
             if (paintProject != null && draft != null) {
                 File saved = new File(draft);
@@ -133,6 +148,10 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
+        if (pendingLookProject != null && pendingLookId != null) {
+            state.putString("lookProject", pendingLookProject.getAbsolutePath());
+            state.putString("lookId", pendingLookId);
+        }
         if (exportProject != null) state.putString("exportProject", exportProject.getAbsolutePath());
         if (apkProject != null) state.putString("apkProject", apkProject.getAbsolutePath());
         if (paintView != null && project != null) {
@@ -175,7 +194,7 @@ public final class MainActivity extends AppCompatActivity {
         showingSamples = false;
         paintView = null;
         project = directory = editorFile = imageFile = null;
-        scenePage = sceneEditorReturn = null; sceneFilesReturn = false;
+        scenePage = sceneObject = sceneEditorReturn = null; sceneFilesReturn = false;
         MaterialToolbar bar = toolbar(R.layout.screen_projects);
         String version = "native unavailable";
         if (nativeAvailable) try { version = nativeVersion(); } catch (Throwable ignored) { }
@@ -361,7 +380,7 @@ public final class MainActivity extends AppCompatActivity {
 
     private void showScene() {
         stopRuntime(); paintView = null; editorFile = imageFile = null;
-        directory = project; scenePage = "scene"; sceneEditorReturn = null; sceneFilesReturn = false;
+        directory = project; scenePage = "scene"; sceneObject = sceneEditorReturn = null; sceneFilesReturn = false;
         final SceneProject scene;
         try { scene = SceneProject.open(store, project); }
         catch (Exception error) { toast(error); showDirectory(project); return; }
@@ -401,7 +420,7 @@ public final class MainActivity extends AppCompatActivity {
             look = id.equals("background") ? scene.background() : scene.actor(id).getString("look");
         } catch (Exception error) { toast(error); showScene(); return; }
         stopRuntime(); editorFile = imageFile = null; directory = project;
-        scenePage = "object"; sceneEditorReturn = null;
+        scenePage = "object"; sceneObject = id; sceneEditorReturn = null;
         MaterialToolbar bar = toolbar(R.layout.screen_scene);
         bar.setTitle(name); bar.setSubtitle(tr("Object", "Объект")); back(bar, this::showScene);
         findViewById(R.id.scene_add).setVisibility(View.GONE);
@@ -419,6 +438,7 @@ public final class MainActivity extends AppCompatActivity {
         TextView current = new TextView(this); current.setTextColor(Color.WHITE);
         current.setText(tr("Look: ", "Образ: ") + (look.isEmpty() ? tr("none", "нет") : look)); content.addView(current);
         content.addView(sceneButton(tr("Choose look from assets", "Выбрать образ из assets"), () -> chooseSceneLook(scene, id)));
+        content.addView(sceneButton(tr("Import image", "Импортировать изображение"), () -> pickSceneLook(id)));
         if (!id.equals("background")) {
             content.addView(sceneButton(tr("Rename actor", "Переименовать актёра"), () ->
                 nameDialog(tr("Rename actor", "Переименовать актёра"), name, tr("Actor name", "Имя актёра"), tr("Save", "Сохранить"), value -> {
@@ -454,7 +474,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void showDirectory(File selected) {
-        scenePage = sceneEditorReturn = null;
+        scenePage = sceneObject = sceneEditorReturn = null;
         stopRuntime();
         paintView = null;
         directory = selected;
@@ -822,6 +842,40 @@ public final class MainActivity extends AppCompatActivity {
         }, "LuaC-project-export").start();
     }
 
+    private void pickSceneLook(String id) {
+        pendingLookProject = project; pendingLookId = id;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {"image/png", "image/jpeg"});
+        try { startActivityForResult(intent, PICK_LOOK); }
+        catch (Exception error) { pendingLookProject = null; pendingLookId = null; toast(error); }
+    }
+    private void importSceneLook(File selected, String id, Uri uri) {
+        new Thread(() -> {
+            File imported = null;
+            try {
+                try (InputStream input = getContentResolver().openInputStream(uri)) {
+                    imported = store.importSceneLook(selected, input);
+                }
+                android.graphics.BitmapFactory.Options options = new android.graphics.BitmapFactory.Options();
+                options.inJustDecodeBounds = true;
+                android.graphics.BitmapFactory.decodeFile(imported.getAbsolutePath(), options);
+                if (options.outWidth <= 0 || options.outHeight <= 0 || options.outWidth > 4096 || options.outHeight > 4096)
+                    throw new IOException("Image is invalid or exceeds 4096 × 4096");
+                SceneProject.open(store, selected).setLook(id, "assets/" + imported.getName());
+                handler.post(() -> {
+                    if (!destroyed && selected.equals(project) && "object".equals(scenePage) && id.equals(sceneObject)) {
+                        showSceneObject(id);
+                        toast(tr("Image imported", "Изображение импортировано"));
+                    }
+                });
+            } catch (Exception error) {
+                if (imported != null && !imported.delete()) error.addSuppressed(new IOException("Could not remove incomplete image"));
+                handler.post(() -> { if (!destroyed) toast(error); });
+            }
+        }, "LuaC-look-import").start();
+    }
     private void pickAsset() {
         importDirectory = directory;
         String path = relative(directory);
@@ -833,6 +887,13 @@ public final class MainActivity extends AppCompatActivity {
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == PICK_LOOK) {
+            File selected = pendingLookProject; String id = pendingLookId;
+            pendingLookProject = null; pendingLookId = null;
+            if (result == RESULT_OK && data != null && data.getData() != null && selected != null && id != null)
+                importSceneLook(selected, id, data.getData());
+            return;
+        }
         if (request == BUILD_APK) {
             File selected = apkProject; apkProject = null;
             if (result == RESULT_OK && data != null && data.getData() != null && selected != null)
