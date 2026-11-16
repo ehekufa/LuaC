@@ -500,9 +500,11 @@ jobs:
         shell: bash
         run: |
           if ! gradle --no-daemon testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease > android-build.log 2>&1; then
-            message=$(grep -E '(^|[ :])error:|undefined reference|undefined symbol|FAILURE:|^e:' android-build.log | tail -c 3000 | tr '\r\n' '  ' || true)
+            # Include Gradle's "What went wrong" and dependency/network errors,
+            # not only the generic FAILURE heading, in the check annotation.
+            message=$(tail -c 10000 android-build.log | tr '\r\n' '  ' | sed 's/%/%25/g')
             echo "::error file=android/app/build.gradle::${message}"
-            tail -100 android-build.log
+            tail -150 android-build.log
             exit 1
           fi
           tail -20 android-build.log
