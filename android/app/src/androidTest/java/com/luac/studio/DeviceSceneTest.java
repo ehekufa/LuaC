@@ -37,9 +37,9 @@ public class DeviceSceneTest {
                 try {
                     RuntimeView view = new RuntimeView(screen, project, (id, x, y, down) -> {});
                     view.layout(0, 0, 100, 100);
-                    org.json.JSONObject actor = new org.json.JSONObject().put("x", 0).put("y", 0).put("width", 40).put("height", 40)
+                    org.json.JSONObject actor = new org.json.JSONObject().put("x", 0).put("y", 0).put("rotation", 0).put("width", 40).put("height", 40)
                         .put("color", new org.json.JSONArray().put(0).put(0).put(1).put(1));
-                    org.json.JSONObject background = new org.json.JSONObject().put("x", 0).put("y", 0).put("z", -1)
+                    org.json.JSONObject background = new org.json.JSONObject().put("x", 0).put("y", 0).put("rotation", 0).put("z", -1)
                         .put("width", 100).put("height", 100).put("texture", "red.png");
                     view.setFrame(new org.json.JSONObject().put("entities", new org.json.JSONArray().put(actor).put(background)));
                     android.graphics.Bitmap target = android.graphics.Bitmap.createBitmap(100, 100, android.graphics.Bitmap.Config.ARGB_8888);
