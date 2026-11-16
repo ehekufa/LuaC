@@ -95,23 +95,24 @@ public class DeviceBlocksTest {
                     android.widget.LinearLayout card = (android.widget.LinearLayout) header.getParent();
                     card.getChildAt(1).setVisibility(android.view.View.GONE);
                 }
-                view.post(() -> {
-                    java.util.ArrayList<android.view.View> found = new java.util.ArrayList<>();
-                    view.findViewsWithText(found, "Hold and drag: Print: A", android.view.View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION);
-                    if (found.isEmpty()) return;
-                    android.view.View title = found.get(0), target = view.findViewWithTag("block-drop-0-2");
-                    if (target == null) return;
-                    android.graphics.Rect visible = new android.graphics.Rect();
-                    if (!target.getGlobalVisibleRect(visible)) return;
-                    int[] a = new int[2], b = new int[2];
-                    title.getLocationOnScreen(a); target.getLocationOnScreen(b);
-                    positions[0] = new int[] {a[0] + title.getWidth() / 2, a[1] + title.getHeight() / 2};
-                    positions[1] = new int[] {b[0] + target.getWidth() / 2, b[1] + target.getHeight() / 2};
-                });
             });
             InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-            assertNotNull(positions[0]); assertNotNull(positions[1]);
             onView(withContentDescription("Hold and drag: Print: A")).check(matches(isDisplayed()));
+            activity.onActivity(screen -> {
+                BlockEditorView view = editorView[0];
+                java.util.ArrayList<android.view.View> found = new java.util.ArrayList<>();
+                view.findViewsWithText(found, "Hold and drag: Print: A", android.view.View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION);
+                if (found.isEmpty()) return;
+                android.view.View title = found.get(0), target = view.findViewWithTag("block-drop-0-2");
+                if (target == null) return;
+                android.graphics.Rect visible = new android.graphics.Rect();
+                if (!target.getGlobalVisibleRect(visible)) return;
+                int[] a1 = new int[2], b1 = new int[2];
+                title.getLocationOnScreen(a1); target.getLocationOnScreen(b1);
+                positions[0] = new int[] {a1[0] + title.getWidth() / 2, a1[1] + title.getHeight() / 2};
+                positions[1] = new int[] {b1[0] + target.getWidth() / 2, b1[1] + target.getHeight() / 2};
+            });
+            assertNotNull(positions[0]); assertNotNull(positions[1]);
             long down = android.os.SystemClock.uptimeMillis();
             android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
             send(instrumentation, down, android.view.MotionEvent.ACTION_DOWN, positions[0][0], positions[0][1]);
