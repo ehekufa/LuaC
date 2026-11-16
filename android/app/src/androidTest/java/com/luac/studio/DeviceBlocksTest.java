@@ -101,10 +101,10 @@ public class DeviceBlocksTest {
                     if (target == null) return;
                     android.graphics.Rect visible = new android.graphics.Rect();
                     if (!target.getGlobalVisibleRect(visible)) return;
-                    int[] a = new int[2];
-                    title.getLocationOnScreen(a);
+                    int[] a = new int[2], b = new int[2];
+                    title.getLocationOnScreen(a); target.getLocationOnScreen(b);
                     positions[0] = new int[] {a[0] + title.getWidth() / 2, a[1] + title.getHeight() / 2};
-                    positions[1] = new int[] {visible.centerX(), visible.centerY()};
+                    positions[1] = new int[] {b[0] + target.getWidth() / 2, b[1] + target.getHeight() / 2};
                 });
             });
             InstrumentationRegistry.getInstrumentation().waitForIdleSync();
