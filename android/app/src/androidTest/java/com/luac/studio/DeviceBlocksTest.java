@@ -83,16 +83,28 @@ public class DeviceBlocksTest {
             activity.onActivity(screen -> {
                 BlockEditorView view = new BlockEditorView(screen, document, false);
                 screen.setContentView(view);
+                // Keep both endpoints on even the smallest emulator screen.
+                android.widget.LinearLayout content = (android.widget.LinearLayout) view.getChildAt(0);
+                content.getChildAt(0).setVisibility(android.view.View.GONE);
+                content.getChildAt(1).setVisibility(android.view.View.GONE);
+                java.util.ArrayList<android.view.View> headers = new java.util.ArrayList<>();
+                view.findViewsWithText(headers, "Hold and drag: Print:", android.view.View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION);
+                for (android.view.View header : headers) {
+                    android.widget.LinearLayout card = (android.widget.LinearLayout) header.getParent();
+                    card.getChildAt(1).setVisibility(android.view.View.GONE);
+                }
                 view.post(() -> {
                     java.util.ArrayList<android.view.View> found = new java.util.ArrayList<>();
                     view.findViewsWithText(found, "Hold and drag: Print: A", android.view.View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION);
                     if (found.isEmpty()) return;
                     android.view.View title = found.get(0), target = view.findViewWithTag("block-drop-0-2");
                     if (target == null) return;
-                    int[] a = new int[2], b = new int[2];
-                    title.getLocationOnScreen(a); target.getLocationOnScreen(b);
+                    android.graphics.Rect visible = new android.graphics.Rect();
+                    if (!target.getGlobalVisibleRect(visible)) return;
+                    int[] a = new int[2];
+                    title.getLocationOnScreen(a);
                     positions[0] = new int[] {a[0] + title.getWidth() / 2, a[1] + title.getHeight() / 2};
-                    positions[1] = new int[] {b[0] + target.getWidth() / 2, b[1] + target.getHeight() / 2};
+                    positions[1] = new int[] {visible.centerX(), visible.centerY()};
                 });
             });
             InstrumentationRegistry.getInstrumentation().waitForIdleSync();
