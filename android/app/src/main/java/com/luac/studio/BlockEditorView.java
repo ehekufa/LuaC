@@ -68,7 +68,7 @@ final class BlockEditorView extends ScrollView {
             String type = block.getString("type");
             LinearLayout card = new LinearLayout(getContext()); card.setOrientation(LinearLayout.VERTICAL);
             GradientDrawable background = new GradientDrawable();
-            background.setColor(type.equals("repeat") || type.equals("if") || type.equals("ifelse") ? 0xff31507b : 0xff285b55);
+            background.setColor(BlockCategories.color(type));
             background.setCornerRadius(pad * 1.5f); card.setBackground(background);
             LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
             cardParams.setMargins(0, pad / 2, 0, pad / 2); parent.addView(card, cardParams);
@@ -176,18 +176,40 @@ final class BlockEditorView extends ScrollView {
                 Toast.makeText(getContext(), tr("Block limit reached", "Достигнут предел блоков"), Toast.LENGTH_LONG).show(); return;
             }
         } catch (JSONException e) { error(e); return; }
-        String[] labels = {tr("Print text", "Вывести текст"), tr("Print variable", "Вывести переменную"),
+        LinearLayout categories = new LinearLayout(getContext());
+        categories.setOrientation(LinearLayout.VERTICAL);
+        categories.setPadding(pad * 2, pad, pad * 2, pad);
+        AlertDialog dialog = new MaterialAlertDialogBuilder(getContext())
+            .setTitle(tr("Block categories", "Категории блоков"))
+            .setView(categories).setNegativeButton(tr("Cancel", "Отмена"), null).create();
+        String[] names = {tr("Output", "Вывод"), tr("Variables", "Переменные"),
+            tr("Control", "Управление"), tr("Scene and motion", "Сцена и движение")};
+        for (int category = 0; category < names.length; category++) {
+            final int selected = category;
+            MaterialButton entry = new MaterialButton(getContext());
+            entry.setText(names[category]); entry.setAllCaps(false); entry.setTextColor(Color.WHITE);
+            entry.setBackgroundTintList(android.content.res.ColorStateList.valueOf(BlockCategories.COLORS[category]));
+            entry.setOnClickListener(v -> { dialog.dismiss(); chooseBlock(list, selected); });
+            categories.addView(entry, new LinearLayout.LayoutParams(-1, -2));
+        }
+        dialog.show();
+    }
+    private void chooseBlock(JSONArray list, int category) {
+        String[] allLabels = {tr("Print text", "Вывести текст"), tr("Print variable", "Вывести переменную"),
             tr("Set number", "Задать число"), tr("Set text", "Задать текст"),
             tr("Change variable", "Изменить переменную"), tr("Multiply variable", "Умножить переменную"),
             tr("Divide variable", "Разделить переменную"), tr("Repeat", "Повторить"),
             tr("If", "Если"), tr("If / otherwise", "Если / иначе"), tr("Create scene", "Создать сцену"),
             tr("Create object", "Создать объект"), tr("Set position", "Задать положение"),
             tr("Move object", "Передвинуть объект"), tr("Set size", "Задать размер"), tr("Set velocity", "Задать скорость")};
+        int[] indices = BlockCategories.indices(category);
+        String[] labels = new String[indices.length];
+        for (int i = 0; i < indices.length; i++) labels[i] = allLabels[indices[i]];
         new MaterialAlertDialogBuilder(getContext()).setTitle(tr("Add block", "Добавить блок"))
             .setItems(labels, (dialog, which) -> {
                 try {
-                    JSONObject b = new JSONObject().put("type", TYPES[which]);
-                    String type = TYPES[which];
+                    String type = TYPES[indices[which]];
+                    JSONObject b = new JSONObject().put("type", type);
                     boolean object = objectType(type);
                     if (type.equals("print") || type.equals("textvar")) b.put("text", "Hello!");
                     if (!type.equals("print") && !type.equals("repeat") && !type.equals("scene")) b.put("name", object ? "sprite" : "score");
