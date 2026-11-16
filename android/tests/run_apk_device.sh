@@ -44,7 +44,7 @@ fi
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb shell am instrument -w -r com.luac.studio.test/androidx.test.runner.AndroidJUnitRunner | tee /tmp/luac-instrument.log
-grep -q 'OK (6 tests)' /tmp/luac-instrument.log
+grep -q 'OK (7 tests)' /tmp/luac-instrument.log
 adb exec-out run-as com.luac.studio cat files/device-project.apk > /tmp/luac-project-test.apk
 "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose /tmp/luac-project-test.apk
 adb exec-out run-as com.luac.studio cat files/device-project-update.apk > /tmp/luac-project-update.apk

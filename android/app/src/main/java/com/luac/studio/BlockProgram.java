@@ -64,12 +64,41 @@ final class BlockProgram {
             String type = block.getString("type");
             for (int n = 0; n < depth; n++) out.append("  ");
             switch (type) {
+                case "scene": out.append("world = engine.world()\n"); break;
+                case "object": case "position": case "move": case "size": case "velocity": {
+                    String name = block.getString("name"), x = block.getString("x"), y = block.getString("y");
+                    if (!validName(name) || name.equals("world") || name.equals("engine") || !validNumber(x) || !validNumber(y))
+                        throw new IllegalArgumentException("Invalid object or coordinates");
+                    if (type.equals("object")) {
+                        out.append("world = world or engine.world()\n");
+                        for (int n = 0; n < depth; n++) out.append("  ");
+                        out.append(name).append(" = engine.create(world, ").append(quote(name));
+                    } else {
+                        String method = type.equals("position") ? "set_position" : type.equals("move") ? "translate" :
+                            type.equals("size") ? "set_size" : "set_velocity";
+                        out.append("engine.").append(method).append('(').append(name);
+                    }
+                    out.append(", ").append(x).append(", ").append(y).append(")\n"); break;
+                }
                 case "print": out.append("print(").append(quote(block.getString("text"))).append(")\n"); break;
-                case "set": case "change": {
+                case "printvar": {
+                    String name = block.getString("name");
+                    if (!validName(name)) throw new IllegalArgumentException("Invalid variable");
+                    out.append("print(").append(name).append(")\n"); break;
+                }
+                case "textvar": {
+                    String name = block.getString("name");
+                    if (!validName(name)) throw new IllegalArgumentException("Invalid variable");
+                    out.append(name).append(" = ").append(quote(block.getString("text"))).append('\n'); break;
+                }
+                case "set": case "change": case "multiply": case "divide": {
                     String name = block.getString("name"), value = block.getString("value");
-                    if (!validName(name) || !validNumber(value)) throw new IllegalArgumentException("Invalid variable or number");
+                    if (!validName(name) || !validNumber(value) || (type.equals("divide") && Double.parseDouble(value) == 0))
+                        throw new IllegalArgumentException("Invalid variable or number");
                     out.append(name).append(" = ");
                     if (type.equals("change")) out.append('(').append(name).append(" or 0) + ");
+                    if (type.equals("multiply")) out.append('(').append(name).append(" or 0) * ");
+                    if (type.equals("divide")) out.append('(').append(name).append(" or 0) / ");
                     out.append(value).append('\n'); break;
                 }
                 case "repeat": {
@@ -80,12 +109,17 @@ final class BlockProgram {
                     for (int n = 0; n < depth; n++) out.append("  ");
                     out.append("end\n"); break;
                 }
-                case "if": {
+                case "if": case "ifelse": {
                     String name = block.getString("name"), value = block.getString("value"), op = block.getString("op");
                     if (!validName(name) || !validNumber(value) || !Arrays.asList("==", "~=", "<", ">", "<=", ">=").contains(op))
                         throw new IllegalArgumentException("Invalid condition");
                     out.append("if ").append(name).append(' ').append(op).append(' ').append(value).append(" then\n");
                     generate(out, block.getJSONArray("children"), depth + 1, count);
+                    if (type.equals("ifelse")) {
+                        for (int n = 0; n < depth; n++) out.append("  ");
+                        out.append("else\n");
+                        generate(out, block.getJSONArray("otherwise"), depth + 1, count);
+                    }
                     for (int n = 0; n < depth; n++) out.append("  ");
                     out.append("end\n"); break;
                 }

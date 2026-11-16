@@ -73,4 +73,50 @@ public class DeviceBlocksTest {
             store.delete(project);
         }
     }
+    @Test public void draggingReordersBlocks() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        BlockProgram document = BlockProgram.open("");
+        document.blocks.put(new org.json.JSONObject().put("type", "print").put("text", "A"));
+        document.blocks.put(new org.json.JSONObject().put("type", "print").put("text", "B"));
+        final int[][] positions = {null, null};
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            activity.onActivity(screen -> {
+                BlockEditorView view = new BlockEditorView(screen, document, false);
+                screen.setContentView(view);
+                view.post(() -> {
+                    java.util.ArrayList<android.view.View> found = new java.util.ArrayList<>();
+                    view.findViewsWithText(found, "Hold and drag: Print: A", android.view.View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION);
+                    if (found.isEmpty()) return;
+                    android.view.View title = found.get(0), target = view.findViewWithTag("block-drop-0-2");
+                    if (target == null) return;
+                    int[] a = new int[2], b = new int[2];
+                    title.getLocationOnScreen(a); target.getLocationOnScreen(b);
+                    positions[0] = new int[] {a[0] + title.getWidth() / 2, a[1] + title.getHeight() / 2};
+                    positions[1] = new int[] {b[0] + target.getWidth() / 2, b[1] + target.getHeight() / 2};
+                });
+            });
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            assertNotNull(positions[0]); assertNotNull(positions[1]);
+            long down = android.os.SystemClock.uptimeMillis();
+            android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+            send(instrumentation, down, android.view.MotionEvent.ACTION_DOWN, positions[0][0], positions[0][1]);
+            android.os.SystemClock.sleep(900);
+            for (int i = 1; i <= 12; i++) {
+                float t = i / 12f;
+                send(instrumentation, down, android.view.MotionEvent.ACTION_MOVE,
+                    positions[0][0] + t * (positions[1][0] - positions[0][0]),
+                    positions[0][1] + t * (positions[1][1] - positions[0][1]));
+                android.os.SystemClock.sleep(30);
+            }
+            send(instrumentation, down, android.view.MotionEvent.ACTION_UP, positions[1][0], positions[1][1]);
+            instrumentation.waitForIdleSync();
+            assertEquals("B", document.blocks.getJSONObject(0).getString("text"));
+            assertEquals("A", document.blocks.getJSONObject(1).getString("text"));
+            assertTrue(document.dirty);
+        }
+    }
+    private static void send(android.app.Instrumentation instrumentation, long down, int action, float x, float y) {
+        android.view.MotionEvent event = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action, x, y, 0);
+        try { instrumentation.sendPointerSync(event); } finally { event.recycle(); }
+    }
 }

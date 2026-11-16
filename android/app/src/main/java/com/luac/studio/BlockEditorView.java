@@ -1,6 +1,8 @@
 package com.luac.studio;
 
 import android.content.Context;
+import android.content.ClipData;
+import android.view.DragEvent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -24,7 +26,7 @@ final class BlockEditorView extends ScrollView {
     private final boolean ru;
     private final LinearLayout content;
     private final int pad;
-    private static final String[] TYPES = {"print", "set", "change", "repeat", "if"};
+    private static final String[] TYPES = {"print", "printvar", "set", "textvar", "change", "multiply", "divide", "repeat", "if", "ifelse", "scene", "object", "position", "move", "size", "velocity"};
     private static final String[] OPS = {"==", "~=", "<", ">", "<=", ">="};
 
     BlockEditorView(Context context, BlockProgram program, boolean ru) {
@@ -52,6 +54,8 @@ final class BlockEditorView extends ScrollView {
         TextView info = text(tr("Blocks run before the existing script. Existing code is kept unchanged.",
             "Блоки выполняются перед существующим скриптом. Исходный код сохраняется без изменений."));
         info.setId(R.id.blocks_info); content.addView(info);
+        content.addView(text(tr("Hold a block title and drag it to a line to move it, including into a nested block.",
+            "Зажмите название блока и перетащите его на линию, в том числе внутрь другого блока.")));
         if (program.recovered) content.addView(text(tr("The script changed outside blocks. It is preserved as existing code; new blocks will be added before it.",
             "Скрипт изменён вне блоков. Он сохранён как исходный код; новые блоки будут добавлены перед ним.")));
         try { drawList(content, program.blocks, 0); } catch (JSONException e) { error(e); }
@@ -59,15 +63,20 @@ final class BlockEditorView extends ScrollView {
     private void drawList(LinearLayout parent, JSONArray list, int depth) throws JSONException {
         for (int i = 0; i < list.length(); i++) {
             final int index = i;
+            dropLine(parent, list, i, depth);
             JSONObject block = list.getJSONObject(i);
             String type = block.getString("type");
             LinearLayout card = new LinearLayout(getContext()); card.setOrientation(LinearLayout.VERTICAL);
             GradientDrawable background = new GradientDrawable();
-            background.setColor(type.equals("repeat") || type.equals("if") ? 0xff31507b : 0xff285b55);
+            background.setColor(type.equals("repeat") || type.equals("if") || type.equals("ifelse") ? 0xff31507b : 0xff285b55);
             background.setCornerRadius(pad * 1.5f); card.setBackground(background);
             LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
             cardParams.setMargins(0, pad / 2, 0, pad / 2); parent.addView(card, cardParams);
-            TextView title = text(summary(block)); title.setTypeface(null, Typeface.BOLD); card.addView(title);
+            TextView title = text(summary(block)); title.setTypeface(null, Typeface.BOLD);
+            title.setContentDescription(tr("Hold and drag: ", "Зажмите и перетащите: ") + summary(block));
+            title.setOnLongClickListener(v -> v.startDragAndDrop(ClipData.newPlainText("block", ""),
+                new View.DragShadowBuilder(v), new DraggedBlock(list, index), 0));
+            card.addView(title);
             LinearLayout actions = new LinearLayout(getContext()); actions.setOrientation(LinearLayout.HORIZONTAL);
             addAction(actions, tr("Edit", "Изменить"), () -> edit(block, false, list));
             addAction(actions, "↑", () -> move(list, index, index - 1));
@@ -78,15 +87,49 @@ final class BlockEditorView extends ScrollView {
                     .setNegativeButton(tr("Cancel", "Отмена"), null).show();
             });
             card.addView(actions);
-            if (type.equals("repeat") || type.equals("if")) {
+            if (type.equals("repeat") || type.equals("if") || type.equals("ifelse")) {
                 LinearLayout nested = new LinearLayout(getContext()); nested.setOrientation(LinearLayout.VERTICAL);
                 nested.setPadding(pad * 2, 0, pad, pad); card.addView(nested);
                 drawList(nested, block.getJSONArray("children"), depth + 1);
+                if (type.equals("ifelse")) {
+                    nested.addView(text(tr("Otherwise", "Иначе")));
+                    drawList(nested, block.getJSONArray("otherwise"), depth + 1);
+                }
             }
         }
+        dropLine(parent, list, list.length(), depth);
         MaterialButton add = button(tr("+ Add block", "+ Добавить блок"), () -> choose(list, depth));
         if (depth == 0) add.setId(R.id.blocks_add);
         parent.addView(add);
+    }
+    private static final class DraggedBlock {
+        final JSONArray source;
+        final int index;
+        DraggedBlock(JSONArray source, int index) { this.source = source; this.index = index; }
+    }
+    private void dropLine(LinearLayout parent, JSONArray list, int slot, int depth) {
+        TextView line = text("• • •");
+        line.setTextSize(12); line.setTextColor(0xffb9d6d0); line.setGravity(android.view.Gravity.CENTER);
+        line.setPadding(pad, 0, pad, 0);
+        line.setContentDescription(tr("Drop block here", "Перетащите блок сюда"));
+        line.setTag("block-drop-" + depth + "-" + slot);
+        line.setOnDragListener((view, event) -> {
+            if (!(event.getLocalState() instanceof DraggedBlock)) return false;
+            switch (event.getAction()) {
+                case DragEvent.ACTION_DRAG_STARTED: return true;
+                case DragEvent.ACTION_DRAG_ENTERED: view.setBackgroundColor(0xff427c75); return true;
+                case DragEvent.ACTION_DRAG_EXITED:
+                case DragEvent.ACTION_DRAG_ENDED: view.setBackgroundColor(Color.TRANSPARENT); return true;
+                case DragEvent.ACTION_DROP:
+                    DraggedBlock dragged = (DraggedBlock) event.getLocalState();
+                    try {
+                        if (BlockMoves.move(dragged.source, dragged.index, list, slot, depth)) changed();
+                    } catch (JSONException e) { error(e); }
+                    return true;
+                default: return true;
+            }
+        });
+        parent.addView(line, new LinearLayout.LayoutParams(-1, Math.max(pad * 3, 24)));
     }
     private void addAction(LinearLayout row, String label, Runnable action) {
         MaterialButton b = button(label, action);
@@ -100,11 +143,21 @@ final class BlockEditorView extends ScrollView {
     }
     private String summary(JSONObject b) throws JSONException {
         switch (b.getString("type")) {
+            case "scene": return tr("Create scene", "Создать сцену");
+            case "object": return tr("Create object ", "Создать объект ") + b.getString("name") + " (" + b.getString("x") + ", " + b.getString("y") + ")";
+            case "position": return tr("Set position ", "Задать положение ") + b.getString("name") + " (" + b.getString("x") + ", " + b.getString("y") + ")";
+            case "move": return tr("Move object ", "Передвинуть объект ") + b.getString("name") + " (" + b.getString("x") + ", " + b.getString("y") + ")";
+            case "size": return tr("Set size ", "Задать размер ") + b.getString("name") + " (" + b.getString("x") + ", " + b.getString("y") + ")";
+            case "velocity": return tr("Set velocity ", "Задать скорость ") + b.getString("name") + " (" + b.getString("x") + ", " + b.getString("y") + ")";
             case "print": return tr("Print: ", "Вывести: ") + b.getString("text");
+            case "printvar": return tr("Print variable: ", "Вывести переменную: ") + b.getString("name");
+            case "textvar": return tr("Set text ", "Задать текст ") + b.getString("name") + " = " + b.getString("text");
+            case "multiply": return tr("Multiply ", "Умножить ") + b.getString("name") + " × " + b.getString("value");
+            case "divide": return tr("Divide ", "Разделить ") + b.getString("name") + " ÷ " + b.getString("value");
             case "set": return tr("Set ", "Задать ") + b.getString("name") + " = " + b.getString("value");
             case "change": return tr("Change ", "Изменить ") + b.getString("name") + " + " + b.getString("value");
             case "repeat": return tr("Repeat ", "Повторить ") + b.getString("value") + tr(" times", " раз");
-            case "if": return tr("If ", "Если ") + b.getString("name") + " " + b.getString("op") + " " + b.getString("value");
+            case "ifelse": case "if": return tr("If ", "Если ") + b.getString("name") + " " + b.getString("op") + " " + b.getString("value");
             default: throw new IllegalArgumentException("Unknown block");
         }
     }
@@ -113,6 +166,7 @@ final class BlockEditorView extends ScrollView {
         for (int i = 0; i < blocks.length(); i++) {
             JSONObject block = blocks.getJSONObject(i); total++;
             if (block.has("children")) total += count(block.getJSONArray("children"));
+            if (block.has("otherwise")) total += count(block.getJSONArray("otherwise"));
         }
         return total;
     }
@@ -122,18 +176,27 @@ final class BlockEditorView extends ScrollView {
                 Toast.makeText(getContext(), tr("Block limit reached", "Достигнут предел блоков"), Toast.LENGTH_LONG).show(); return;
             }
         } catch (JSONException e) { error(e); return; }
-        String[] labels = {tr("Print text", "Вывести текст"), tr("Set variable", "Задать переменную"),
-            tr("Change variable", "Изменить переменную"), tr("Repeat", "Повторить"), tr("If", "Если")};
+        String[] labels = {tr("Print text", "Вывести текст"), tr("Print variable", "Вывести переменную"),
+            tr("Set number", "Задать число"), tr("Set text", "Задать текст"),
+            tr("Change variable", "Изменить переменную"), tr("Multiply variable", "Умножить переменную"),
+            tr("Divide variable", "Разделить переменную"), tr("Repeat", "Повторить"),
+            tr("If", "Если"), tr("If / otherwise", "Если / иначе"), tr("Create scene", "Создать сцену"),
+            tr("Create object", "Создать объект"), tr("Set position", "Задать положение"),
+            tr("Move object", "Передвинуть объект"), tr("Set size", "Задать размер"), tr("Set velocity", "Задать скорость")};
         new MaterialAlertDialogBuilder(getContext()).setTitle(tr("Add block", "Добавить блок"))
             .setItems(labels, (dialog, which) -> {
                 try {
                     JSONObject b = new JSONObject().put("type", TYPES[which]);
-                    if (which == 0) b.put("text", "Hello!");
-                    else if (which == 3) b.put("value", "3").put("children", new JSONArray());
-                    else {
-                        b.put("name", "score").put("value", "0");
-                        if (which == 4) b.put("op", "==").put("children", new JSONArray());
-                    }
+                    String type = TYPES[which];
+                    boolean object = objectType(type);
+                    if (type.equals("print") || type.equals("textvar")) b.put("text", "Hello!");
+                    if (!type.equals("print") && !type.equals("repeat") && !type.equals("scene")) b.put("name", object ? "sprite" : "score");
+                    if (object) b.put("x", type.equals("size") ? "64" : "0").put("y", type.equals("size") ? "64" : "0");
+                    if (!type.equals("print") && !type.equals("printvar") && !type.equals("textvar") && !type.equals("scene") && !object)
+                        b.put("value", type.equals("repeat") ? "3" : type.equals("multiply") || type.equals("divide") ? "1" : "0");
+                    if (type.equals("repeat") || type.equals("if") || type.equals("ifelse")) b.put("children", new JSONArray());
+                    if (type.equals("if") || type.equals("ifelse")) b.put("op", "==");
+                    if (type.equals("ifelse")) b.put("otherwise", new JSONArray());
                     edit(b, true, list);
                 } catch (JSONException e) { error(e); }
             }).setNegativeButton(tr("Cancel", "Отмена"), null).show();
@@ -144,18 +207,24 @@ final class BlockEditorView extends ScrollView {
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         input.setText(value); form.addView(input); return input;
     }
+    private boolean objectType(String type) {
+        return type.equals("object") || type.equals("position") || type.equals("move") || type.equals("size") || type.equals("velocity");
+    }
     private void edit(JSONObject block, boolean adding, JSONArray destination) {
         try {
             String type = block.getString("type");
             LinearLayout form = new LinearLayout(getContext()); form.setOrientation(LinearLayout.VERTICAL);
             form.setPadding(pad * 2, 0, pad * 2, 0);
             form.setFocusableInTouchMode(true);
-            EditText text = type.equals("print") ? field(form, tr("Text", "Текст"), block.getString("text")) : null;
-            EditText name = type.equals("set") || type.equals("change") || type.equals("if") ?
-                field(form, tr("Variable name", "Имя переменной"), block.getString("name")) : null;
-            EditText value = !type.equals("print") ? field(form, type.equals("repeat") ? tr("Count (0–10000)", "Количество (0–10000)") : tr("Number", "Число"), block.getString("value")) : null;
-            final String[] op = {type.equals("if") ? block.getString("op") : "=="};
-            if (type.equals("if")) {
+            boolean object = objectType(type);
+            EditText text = type.equals("print") || type.equals("textvar") ? field(form, tr("Text", "Текст"), block.getString("text")) : null;
+            EditText name = !type.equals("print") && !type.equals("repeat") && !type.equals("scene") ?
+                field(form, object ? tr("Object name", "Имя объекта") : tr("Variable name", "Имя переменной"), block.getString("name")) : null;
+            EditText x = object ? field(form, tr("X / width", "X / ширина"), block.getString("x")) : null;
+            EditText y = object ? field(form, tr("Y / height", "Y / высота"), block.getString("y")) : null;
+            EditText value = !type.equals("print") && !type.equals("printvar") && !type.equals("textvar") && !type.equals("scene") && !object ? field(form, type.equals("repeat") ? tr("Count (0–10000)", "Количество (0–10000)") : tr("Number", "Число"), block.getString("value")) : null;
+            final String[] op = {type.equals("if") || type.equals("ifelse") ? block.getString("op") : "=="};
+            if (type.equals("if") || type.equals("ifelse")) {
                 MaterialButton operator = button(tr("Comparison: ", "Сравнение: ") + op[0], () -> {});
                 operator.setOnClickListener(v -> new MaterialAlertDialogBuilder(getContext()).setTitle(tr("Comparison", "Сравнение"))
                     .setItems(OPS, (d, index) -> { op[0] = OPS[index]; operator.setText(tr("Comparison: ", "Сравнение: ") + op[0]); }).show());
@@ -166,15 +235,20 @@ final class BlockEditorView extends ScrollView {
             dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                 String n = name == null ? "" : name.getText().toString().trim();
                 String val = value == null ? "" : value.getText().toString().trim();
-                if (name != null && !BlockProgram.validName(n)) { name.setError(tr("Use a Lua variable name", "Введите имя переменной Lua")); return; }
-                if (value != null && !(type.equals("repeat") ? val.matches("[0-9]{1,5}") && Integer.parseInt(val) <= 10000 : BlockProgram.validNumber(val))) {
+                if (name != null && (!BlockProgram.validName(n) || (object && (n.equals("world") || n.equals("engine"))))) { name.setError(tr("Use a Lua variable name", "Введите имя переменной Lua")); return; }
+                if (object && (!BlockProgram.validNumber(x.getText().toString().trim()) || !BlockProgram.validNumber(y.getText().toString().trim()))) {
+                    x.setError(tr("Enter valid coordinates", "Введите корректные координаты")); return;
+                }
+                if (value != null && !(type.equals("repeat") ? val.matches("[0-9]{1,5}") && Integer.parseInt(val) <= 10000 :
+                    BlockProgram.validNumber(val) && (!type.equals("divide") || Double.parseDouble(val) != 0))) {
                     value.setError(tr("Enter a valid number", "Введите корректное число")); return;
                 }
                 try {
                     if (text != null) block.put("text", text.getText().toString());
                     if (name != null) block.put("name", n);
+                    if (object) block.put("x", x.getText().toString().trim()).put("y", y.getText().toString().trim());
                     if (value != null) block.put("value", val);
-                    if (type.equals("if")) block.put("op", op[0]);
+                    if (type.equals("if") || type.equals("ifelse")) block.put("op", op[0]);
                     if (adding) destination.put(block);
                     changed(); dialog.dismiss();
                 } catch (JSONException e) { error(e); }
