@@ -158,14 +158,15 @@ Workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) запус
 | `LuaC-windows-x86_64` | `luac.exe`, статическая и динамическая библиотеки, headers |
 | `LuaC-linux-x86_64` | CLI, `libluac.a`, `libluac.so`, headers |
 | `LuaC-macos-arm64` | CLI, `libluac.a`, `libluac.dylib`, headers |
-| `LuaC-Studio-windows-x86_64` | Vulkan GUI `.exe`, shaders и необходимые DLL рядом с приложением |
+| `LuaC-Studio-windows-x86_64` | Java Studio для Windows: launcher `.exe`, Java runtime, LuaC и TinyCC в комплекте |
+| `LuaC-Studio-Vulkan-windows-x86_64` | прежний Vulkan GUI, shaders и необходимые DLL |
 | `LuaC-Studio-linux-x86_64` | Vulkan GUI, CLI, shaders |
 | `LuaC-Studio-Android-Debug-APK` | устанавливаемый debug APK с проектами, многофайловым runtime, assets и game viewport |
 | `LuaC-Studio-Android-Release-APK` | release APK с вашей подписью, если настроены секреты |
 
-Windows Studio нужно запускать после распаковки всего ZIP: `luac-gui.exe`, DLL и папка `build` должны оставаться вместе. CI проверяет запуск проверки зависимостей из распакованного архива без MSYS2 в `PATH`; эта проверка не заменяет запуск Vulkan-интерфейса на вашей видеокарте.
+Windows Java Studio нужно распаковать целиком и запустить `LuaC-Studio.exe`; отдельная установка Java, GCC или MSYS2 не требуется. В комплект включены компактные Java runtime и TinyCC (это не GCC и совместимость с произвольными GCC-расширениями не гарантируется). Проекты хранятся в `%APPDATA%/LuaC/projects`. Java-версия поддерживает проекты, файлы, папки, импорт файлов, текстовый редактор, проверку, запуск, остановку и настройки; блочный редактор, Paint, сцены и сборка Android APK из Android Studio пока не перенесены. Предыдущий Vulkan-интерфейс остаётся отдельным артефактом; его `luac-gui.exe`, DLL и папка `build` должны находиться вместе.
 
-Для JIT/AOT на desktop нужен системный C-компилятор (`cc`, GCC или Clang). В APK синтаксическая проверка и генерация C выполняются внутри нативной библиотеки. **RUN** использует встроенный AST runtime поверх тех же native libraries, поэтому проекты запускаются на телефоне без host C toolchain.
+Для JIT/AOT в Java Studio на Windows используется комплектный TinyCC, без установки GCC. Для других сборок desktop может потребоваться системный C-компилятор (`cc`, GCC или Clang). В APK синтаксическая проверка и генерация C выполняются внутри нативной библиотеки. **RUN** использует встроенный AST runtime поверх тех же native libraries, поэтому проекты запускаются на телефоне без host C toolchain.
 
 ## LuaC Studio — Vulkan GUI
 
@@ -183,7 +184,7 @@ if (nk_begin(&ui, "Toolbar", nk_rect(0, 0, width, 64), NK_WINDOW_BACKGROUND)) {
 nk_end(&ui);
 ```
 
-Зависимость закреплена в `gui/third_party/nuklear.h`; исходный upstream commit и лицензия указаны рядом с header. Desktop Studio использует встроенный набор Noto Sans Mono (OFL, `gui/FONT-LICENSE.txt`), запекаемый Nuklear в Vulkan-атлас. Редактор, вывод и текст Engine поддерживают UTF-8: латиницу, кириллицу U+0400–U+052F, греческий и доступную пунктуацию. Отсутствующие в шрифте символы отображаются как `?`, но текст в файле не изменяется. CJK, emoji, объединяющие знаки, сложный shaping и RTL не поддерживаются. GLFW передаёт Unicode-ввод и UTF-8 буфер обмена. По умолчанию интерфейс английский; Settings → Language переключает его на русский в текущем сеансе. В Settings можно выбрать акцент на цветовом круге или ввести `#RRGGBB` и нажать Apply; цвет сохраняется в домашнем каталоге. Подсказки и сообщения компилятора остаются на английском.
+Следующий раздел относится к прежней Vulkan Studio. Java Studio для Windows описана выше. Зависимость закреплена в `gui/third_party/nuklear.h`; исходный upstream commit и лицензия указаны рядом с header. Desktop Studio использует встроенный набор Noto Sans Mono (OFL, `gui/FONT-LICENSE.txt`), запекаемый Nuklear в Vulkan-атлас. Редактор, вывод и текст Engine поддерживают UTF-8: латиницу, кириллицу U+0400–U+052F, греческий и доступную пунктуацию. Отсутствующие в шрифте символы отображаются как `?`, но текст в файле не изменяется. CJK, emoji, объединяющие знаки, сложный shaping и RTL не поддерживаются. GLFW передаёт Unicode-ввод и UTF-8 буфер обмена. По умолчанию интерфейс английский; Settings → Language переключает его на русский в текущем сеансе. В Settings можно выбрать акцент на цветовом круге или ввести `#RRGGBB` и нажать Apply; цвет сохраняется в домашнем каталоге. Подсказки и сообщения компилятора остаются на английском.
 
 ```sh
 # Debian/Ubuntu

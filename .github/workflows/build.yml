@@ -383,8 +383,57 @@ jobs:
         run: ./tests/windows_studio_package.ps1
       - uses: actions/upload-artifact@v6
         with:
-          name: LuaC-Studio-windows-x86_64
+          name: LuaC-Studio-Vulkan-windows-x86_64
           path: dist/LuaC-Studio-windows-x86_64.zip
+
+  java-studio-windows:
+    name: Java Studio Windows
+    runs-on: windows-latest
+    needs: windows
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/download-artifact@v7
+        with:
+          name: LuaC-windows-x86_64
+          path: build/cli-artifact
+      - name: Build Java app and package runtime and TinyCC
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force build/java-classes, build/java-test, build/java-jar, dist/java-image | Out-Null
+          $sources = @(Get-ChildItem desktop/src -Recurse -Filter *.java | ForEach-Object { $_.FullName })
+          & javac -encoding UTF-8 -d build/java-classes $sources
+          if ($LASTEXITCODE -ne 0) { throw 'javac failed' }
+          & javac -encoding UTF-8 -cp build/java-classes -d build/java-test desktop/tests/com/luac/desktop/DesktopTest.java
+          if ($LASTEXITCODE -ne 0) { throw 'test compilation failed' }
+          Copy-Item tests/embedded_project/assets/luac_logo.png build/java-classes/com/luac/desktop/logo.png
+          & javac -encoding UTF-8 -d build/java-classes desktop/tools/IconMaker.java
+          if ($LASTEXITCODE -ne 0) { throw 'icon tool compilation failed' }
+          & java -cp build/java-classes IconMaker tests/embedded_project/assets/luac_logo.png build/luac.ico
+          if ($LASTEXITCODE -ne 0) { throw 'icon conversion failed' }
+          & jar --create --file build/java-jar/LuaC-Studio.jar --main-class com.luac.desktop.Studio -C build/java-classes .
+          if ($LASTEXITCODE -ne 0) { throw 'jar failed' }
+          & jlink --add-modules java.desktop,java.prefs --strip-debug --no-header-files --no-man-pages --compress=2 --output build/java-runtime
+          if ($LASTEXITCODE -ne 0) { throw 'jlink failed' }
+          & jpackage --type app-image --name LuaC-Studio --input build/java-jar --main-jar LuaC-Studio.jar --main-class com.luac.desktop.Studio --runtime-image build/java-runtime --icon build/luac.ico --dest dist/java-image
+          if ($LASTEXITCODE -ne 0) { throw 'jpackage failed' }
+          Expand-Archive -LiteralPath build/cli-artifact/LuaC-windows-x86_64.zip -DestinationPath build/cli-unpacked
+          $cli = @(Get-ChildItem build/cli-unpacked -Recurse -Filter luac.exe)
+          if ($cli.Count -ne 1) { throw 'Missing CLI package' }
+          Copy-Item -Path (Join-Path $cli[0].DirectoryName '*') -Destination dist/java-image/LuaC-Studio -Recurse -Force
+          Compress-Archive -Path dist/java-image/LuaC-Studio -DestinationPath dist/LuaC-Studio-Java-windows-x86_64.zip
+      - name: Test extracted app without installed Java or GCC
+        shell: pwsh
+        run: ./desktop/tests/windows_package.ps1
+      - uses: actions/upload-artifact@v6
+        with:
+          name: LuaC-Studio-windows-x86_64
+          path: dist/LuaC-Studio-Java-windows-x86_64.zip
+          if-no-files-found: error
 
   android:
     name: Android APK
