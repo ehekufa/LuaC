@@ -1,0 +1,27 @@
+name: Inspect UI snapshots
+on:
+  push:
+    paths: ['.github/workflows/ui-inspect.yml']
+permissions:
+  actions: read
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: LuaC-Studio-Windows-UI-preview
+          run-id: 43844931780
+          github-token: ${{ github.token }}
+          path: screenshots
+      - name: Read previews
+        run: |
+          python3 - <<'PY'
+          import base64, pathlib
+          for name in ('projects', 'editor', 'files'):
+              data = base64.b64encode(pathlib.Path('screenshots', name + '.png').read_bytes()).decode('ascii')
+              chunks = [data[i:i+2500] for i in range(0, len(data), 2500)]
+              for i, chunk in enumerate(chunks):
+                  print(f'::notice::LCPREVIEW-{name}-{i}-{len(chunks)}:{chunk}')
+          PY
