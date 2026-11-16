@@ -19,6 +19,8 @@ $jar = Join-Path $appDir 'app/LuaC-Studio.jar'
 $java = Join-Path $appDir 'runtime/bin/java.exe'
 $classPath = "$jar;$((Resolve-Path build/java-test).Path)"
 $env:LUAC_TRACE = '1'
+New-Item -ItemType Directory -Force build/ui-screenshots | Out-Null
+$env:LUAC_UI_SCREENSHOTS = (Resolve-Path build/ui-screenshots).Path
 $results = & $java '-Dfile.encoding=UTF-8' -cp $classPath com.luac.desktop.DesktopTest $appDir '--gui' 2>&1
 $exitCode = $LASTEXITCODE
 $results | ForEach-Object { Write-Output "$_" }

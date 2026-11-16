@@ -450,6 +450,7 @@ jobs:
           & javac -encoding UTF-8 -cp build/java-classes -d build/java-test desktop/tests/com/luac/desktop/DesktopTest.java
           if ($LASTEXITCODE -ne 0) { throw 'test compilation failed' }
           Copy-Item tests/embedded_project/assets/luac_logo.png build/java-classes/com/luac/desktop/logo.png
+          Copy-Item android/app/src/main/assets/samples build/java-classes/samples -Recurse
           & javac -encoding UTF-8 -d build/java-classes desktop/tools/IconMaker.java
           if ($LASTEXITCODE -ne 0) { throw 'icon tool compilation failed' }
           & java -cp build/java-classes IconMaker tests/embedded_project/assets/luac_logo.png build/luac.ico
@@ -465,6 +466,7 @@ jobs:
           if ($cli.Count -ne 1) { throw 'Missing CLI package' }
           Copy-Item -Path (Join-Path $cli[0].DirectoryName '*') -Destination dist/java-image/LuaC-Studio -Recurse -Force
           Copy-Item -Path build/portable-gcc -Destination dist/java-image/LuaC-Studio/gcc -Recurse -Force
+          Copy-Item -Path desktop/third_party -Destination dist/java-image/LuaC-Studio/licenses/java -Recurse -Force
           Compress-Archive -Path dist/java-image/LuaC-Studio -DestinationPath dist/LuaC-Studio-Java-windows-x86_64.zip -CompressionLevel Optimal
           $size = (Get-Item dist/LuaC-Studio-Java-windows-x86_64.zip).Length
           Write-Output ("::notice::Java Studio ZIP size: {0:N1} MiB" -f ($size / 1MB))
@@ -472,6 +474,11 @@ jobs:
       - name: Test extracted app without installed Java or GCC
         shell: pwsh
         run: ./desktop/tests/windows_package.ps1
+      - uses: actions/upload-artifact@v6
+        with:
+          name: LuaC-Studio-Windows-UI-preview
+          path: build/ui-screenshots/*.png
+          if-no-files-found: error
       - uses: actions/upload-artifact@v6
         with:
           name: LuaC-Studio-windows-x86_64

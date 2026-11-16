@@ -66,6 +66,58 @@ final class ProjectStore {
         if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) throw new IOException("Not a regular file");
         Files.copy(source, target);
     }
+    Path savePainting(Path project, String name, java.awt.image.BufferedImage image) throws IOException {
+        project = checked(project);
+        if (!project.getParent().equals(root)) throw new IOException("Not a project");
+        name = valid(name); if (!name.toLowerCase(Locale.ROOT).endsWith(".png")) name += ".png";
+        Path assets = project.resolve("assets");
+        if (!Files.exists(assets, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(assets);
+        assets = checked(assets);
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        if (!javax.imageio.ImageIO.write(image, "png", buffer)) throw new IOException("PNG encoder unavailable");
+        Path result = assets.resolve(name); Files.write(result, buffer.toByteArray(), StandardOpenOption.CREATE_NEW); return result;
+    }
+    void exportProject(Path project, Path target) throws IOException {
+        project = checked(project);
+        if (!project.getParent().equals(root) || !Files.isDirectory(project)) throw new IOException("Not a project");
+        Path absolute = target.toAbsolutePath();
+        Path tmp = Files.createTempFile(absolute.getParent(), ".luac-export-", ".tmp");
+        try {
+            try (java.io.OutputStream out = Files.newOutputStream(tmp)) { ProjectArchive.write(project.toFile(), out); }
+            try { Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); }
+            catch (AtomicMoveNotSupportedException e) { Files.move(tmp, absolute, StandardCopyOption.REPLACE_EXISTING); }
+        } finally { Files.deleteIfExists(tmp); }
+    }
+    Path importProject(Path archive) throws IOException {
+        ProjectArchive.Document document;
+        try (java.io.InputStream in = Files.newInputStream(archive)) { document = ProjectArchive.read(in); }
+        return installDocument(document);
+    }
+    Path installDocument(ProjectArchive.Document document) throws IOException {
+        String base = valid(document.name);
+        // Validate every component before creating any project data.
+        for (String dir : document.directories) archivePath(dir);
+        for (ProjectArchive.Entry file : document.files) archivePath(file.path);
+        Path stage = Files.createTempDirectory(root, ".luac-import-");
+        try {
+            for (String dir : document.directories) Files.createDirectories(stage.resolve(archivePath(dir)));
+            for (ProjectArchive.Entry entry : document.files) {
+                Path target = stage.resolve(archivePath(entry.path));
+                Files.createDirectories(target.getParent());
+                Files.write(target, entry.bytes, StandardOpenOption.CREATE_NEW);
+            }
+            for (int i = 0; i < 10000; ++i) {
+                Path destination = root.resolve(i == 0 ? base : base + " (" + (i + 1) + ")");
+                try { return Files.move(stage, destination); } catch (FileAlreadyExistsException e) { /* choose a fresh name */ }
+            }
+            throw new IOException("Too many projects with this name");
+        } finally { if (Files.exists(stage)) delete(stage); }
+    }
+    private Path archivePath(String path) throws IOException {
+        Path result = Paths.get("");
+        for (String part : path.split("/", -1)) result = result.resolve(valid(part));
+        return result;
+    }
     Path rename(Path path, String name) throws IOException {
         path = checked(path);
         if (path.equals(root)) throw new IOException("Cannot rename the projects folder");

@@ -3,10 +3,35 @@ package com.luac.desktop;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.concurrent.*;
-import javax.swing.SwingUtilities;
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.MouseEvent;
 
 public final class DesktopTest {
     static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
+    static Component named(Component root, String name) {
+        if (name.equals(root.getName())) return root;
+        if (root instanceof Container) for (Component child : ((Container)root).getComponents()) {
+            Component found = named(child, name); if (found != null) return found;
+        }
+        return null;
+    }
+    static JLabel label(Component root, String text) {
+        if (root instanceof JLabel && text.equals(((JLabel)root).getText())) return (JLabel)root;
+        if (root instanceof Container) for (Component child : ((Container)root).getComponents()) {
+            JLabel found = label(child, text); if (found != null) return found;
+        }
+        return null;
+    }
+    static void capture(Studio studio, String name) {
+        String directory = System.getenv("LUAC_UI_SCREENSHOTS"); if (directory == null) return;
+        try {
+            studio.validate();
+            java.awt.image.BufferedImage image = new java.awt.image.BufferedImage(studio.getWidth(), studio.getHeight(), java.awt.image.BufferedImage.TYPE_INT_RGB);
+            Graphics2D g = image.createGraphics(); studio.printAll(g); g.dispose();
+            javax.imageio.ImageIO.write(image, "png", Paths.get(directory, name + ".png").toFile());
+        } catch (IOException e) { throw new RuntimeException(e); }
+    }
     static String run(Compiler compiler, Path project, String mode, Path source, boolean stop) throws Exception {
         CountDownLatch completed = new CountDownLatch(1), started = new CountDownLatch(1);
         StringBuffer output = new StringBuffer(); int[] code = {-999};
@@ -28,6 +53,22 @@ public final class DesktopTest {
             store.save(file, "return 123\n"); check(store.read(file).equals("return 123\n"), "save/read");
             Path renamed = store.rename(file, "other2.lua");
             check(Files.exists(renamed) && !Files.exists(file), "rename");
+            Files.write(project.resolve("assets/picture.bin"), new byte[]{0, 1, -1});
+            Path archive = temp.resolve("project.luac"); store.exportProject(project, archive);
+            Path imported = store.importProject(archive);
+            check(!project.equals(imported) && Files.isDirectory(imported.resolve("scripts")), "import renamed project");
+            check(java.util.Arrays.equals(Files.readAllBytes(imported.resolve("assets/picture.bin")), new byte[]{0, 1, -1}), "archive binary data");
+            store.delete(imported);
+            PaintCanvas canvas = new PaintCanvas(); canvas.setSize(512, 512);
+            canvas.dispatchEvent(new MouseEvent(canvas, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(), 0, 40, 40, 1, false));
+            check(canvas.dirty && (canvas.image.getRGB(40, 40) >>> 24) != 0, "paint brush");
+            Path painting = store.savePainting(project, "drawing", canvas.image);
+            check(javax.imageio.ImageIO.read(painting.toFile()).getRGB(0, 0) == 0, "PNG transparency");
+            try { store.savePainting(project, "drawing", canvas.image); throw new AssertionError("overwrote painting"); } catch (IOException expected) { }
+            canvas.undo(); check(canvas.image.getRGB(40, 40) == 0, "paint undo");
+            Files.writeString(archive, "{\"format\":\"luac-project\",\"version\":1,\"name\":\"Unsafe\",\"directories\":[],\"files\":[{\"path\":\"../escape\",\"data\":\"QQ==\"}]}");
+            try { store.importProject(archive); throw new AssertionError("accepted unsafe archive"); } catch (IOException expected) { }
+            check(!Files.exists(temp.resolve("escape")) && !Files.exists(store.root.resolve("Unsafe")), "unsafe archive wrote files");
             for (String bad : new String[]{"../escape", "bad/name", "", "CON"}) {
                 try { store.createFile(dir, bad); throw new AssertionError("accepted invalid name: " + bad); } catch (IOException expected) { }
             }
@@ -45,7 +86,18 @@ public final class DesktopTest {
             store.save(project.resolve("main.lua"), "print('GUI RUN OK')\n");
             if (args.length > 1 && args[1].equals("--gui")) {
                 Studio[] ui = new Studio[1];
-                SwingUtilities.invokeAndWait(() -> { try { ui[0] = new Studio(temp.resolve("projects"), home); ui[0].setVisible(true); ui[0].showFiles(project); ui[0].openFile(project.resolve("main.lua")); ui[0].editor.append("-- Edited from Java\n"); check(ui[0].save(), "GUI save failed"); ui[0].runProject(); } catch (Exception e) { throw new RuntimeException(e); } });
+                SwingUtilities.invokeAndWait(() -> { try {
+                    ui[0] = new Studio(temp.resolve("projects"), home); ui[0].setVisible(true);
+                    check(named(ui[0], "projects-list") != null && named(ui[0], "new-project") != null, "projects screen"); capture(ui[0], "projects");
+                    JLabel card = label(ui[0], "Example"); check(card != null, "project card missing");
+                    card.dispatchEvent(new MouseEvent(card, MouseEvent.MOUSE_CLICKED, System.currentTimeMillis(), 0, 4, 4, 1, false));
+                    check(named(ui[0], "files-list") != null, "files screen"); capture(ui[0], "files");
+                    JLabel main = label(ui[0], "main.lua"); check(main != null, "main file card missing");
+                    main.dispatchEvent(new MouseEvent(main, MouseEvent.MOUSE_CLICKED, System.currentTimeMillis(), 0, 4, 4, 1, false));
+                    check(named(ui[0], "script-editor") != null, "editor screen"); capture(ui[0], "editor");
+                    ui[0].editor.append("-- Edited from Java\n"); ((JButton)named(ui[0], "save")).doClick();
+                    ((JButton)named(ui[0], "run")).doClick();
+                } catch (Exception e) { throw new RuntimeException(e); } });
                 long end = System.currentTimeMillis() + 60000;
                 while (System.currentTimeMillis() < end) {
                     boolean[] done = new boolean[1]; SwingUtilities.invokeAndWait(() -> done[0] = !ui[0].running);
@@ -53,6 +105,8 @@ public final class DesktopTest {
                 }
                 SwingUtilities.invokeAndWait(() -> {
                     check(!ui[0].running, "GUI run timeout"); check(ui[0].output.getText().contains("GUI RUN OK"), "GUI output " + ui[0].output.getText());
+                    check(ui[0].stopButton != null && ui[0].stopButton.isEnabled(), "runtime navigation disabled after exit");
+                    ui[0].stopButton.doClick(); check(named(ui[0], "script-editor") != null, "return to editor");
                     ui[0].dispose();
                 });
                 check(store.read(project.resolve("main.lua")).contains("Edited from Java"), "GUI file not saved");
