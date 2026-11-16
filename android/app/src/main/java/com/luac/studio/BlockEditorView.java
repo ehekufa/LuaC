@@ -109,7 +109,7 @@ final class BlockEditorView extends ScrollView {
     }
     private void dropLine(LinearLayout parent, JSONArray list, int slot, int depth) {
         TextView line = text("• • •");
-        line.setTextSize(12); line.setTextColor(0xffb9d6d0); line.setGravity(android.view.Gravity.CENTER);
+        line.setTextSize(12); line.setTextColor(Color.WHITE); line.setGravity(android.view.Gravity.CENTER);
         line.setPadding(pad, 0, pad, 0);
         line.setContentDescription(tr("Drop block here", "Перетащите блок сюда"));
         line.setTag("block-drop-" + depth + "-" + slot);
