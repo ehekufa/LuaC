@@ -10,12 +10,13 @@ final class PaintCanvas extends JComponent {
     final BufferedImage image = new BufferedImage(512, 512, BufferedImage.TYPE_INT_ARGB);
     private BufferedImage undo;
     private int lastX, lastY;
-    int size = 8; Color color = Color.BLACK; boolean eraser, dirty;
+    int size = 8; Color color = Color.BLACK; boolean eraser, dirty, drawing;
     PaintCanvas() {
         setPreferredSize(new Dimension(400, 400)); setName("paint-canvas");
         MouseAdapter mouse = new MouseAdapter() {
-            public void mousePressed(MouseEvent e) { if (!containsPoint(e)) return; snapshot(); lastX = px(e); lastY = py(e); draw(lastX, lastY, lastX, lastY); }
-            public void mouseDragged(MouseEvent e) { if (undo == null) return; int x = px(e), y = py(e); draw(lastX, lastY, x, y); lastX = x; lastY = y; }
+            public void mousePressed(MouseEvent e) { if (!containsPoint(e)) return; snapshot(); drawing = true; lastX = px(e); lastY = py(e); draw(lastX, lastY, lastX, lastY); }
+            public void mouseReleased(MouseEvent e) { drawing = false; }
+            public void mouseDragged(MouseEvent e) { if (!drawing) return; int x = px(e), y = py(e); draw(lastX, lastY, x, y); lastX = x; lastY = y; }
         };
         addMouseListener(mouse); addMouseMotionListener(mouse);
     }

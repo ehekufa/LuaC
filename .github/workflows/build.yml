@@ -491,37 +491,18 @@ jobs:
       - name: Test lightweight extracted app without installed Java or compiler
         shell: pwsh
         run: ./desktop/tests/windows_package.ps1 -Package 'dist/LuaC-Studio-Java-windows-x86_64.zip'
-      - name: Test GCC extracted app without installed Java or compiler
-        shell: pwsh
-        run: ./desktop/tests/windows_package.ps1 -Package 'dist/LuaC-Studio-Java-GCC-windows-x86_64.zip' -ExpectGcc
-      - name: Inspect Studio preview
-        shell: pwsh
-        run: |
-          Add-Type -AssemblyName System.Drawing
-          foreach ($name in @('projects', 'editor')) {
-            $image = [System.Drawing.Image]::FromFile((Resolve-Path "build/ui-screenshots/$name.png").Path)
-            $small = [System.Drawing.Bitmap]::new(525, 380)
-            $graphics = [System.Drawing.Graphics]::FromImage($small)
-            $graphics.DrawImage($image, 0, 0, 525, 380)
-            $memory = [System.IO.MemoryStream]::new()
-            $small.Save($memory, [System.Drawing.Imaging.ImageFormat]::Jpeg)
-            $encoded = [Convert]::ToBase64String($memory.ToArray())
-            $count = [Math]::Ceiling($encoded.Length / 12000)
-            for ($i = 0; $i -lt $count; $i++) {
-              $part = $encoded.Substring($i * 12000, [Math]::Min(12000, $encoded.Length - $i * 12000))
-              Write-Output ("::notice file=desktop/src/com/luac/desktop/Studio.java::LUACSCREEN-{0}-{1}-{2}:{3}" -f $name, $i, $count, $part)
-            }
-            $memory.Dispose(); $graphics.Dispose(); $small.Dispose(); $image.Dispose()
-          }
-      - uses: actions/upload-artifact@v6
-        with:
-          name: LuaC-Studio-Windows-UI-preview
-          path: build/ui-screenshots/*.png
-          if-no-files-found: error
       - uses: actions/upload-artifact@v6
         with:
           name: LuaC-Studio-windows-x86_64
           path: dist/LuaC-Studio-Java-windows-x86_64.zip
+          if-no-files-found: error
+      - name: Test GCC extracted app without installed Java or compiler
+        shell: pwsh
+        run: ./desktop/tests/windows_package.ps1 -Package 'dist/LuaC-Studio-Java-GCC-windows-x86_64.zip' -ExpectGcc
+      - uses: actions/upload-artifact@v6
+        with:
+          name: LuaC-Studio-Windows-UI-preview
+          path: build/ui-screenshots/*.png
           if-no-files-found: error
       - uses: actions/upload-artifact@v6
         with:

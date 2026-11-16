@@ -18,6 +18,7 @@ if (!$ExpectGcc -and (Test-Path (Join-Path $appDir 'gcc/bin/gcc.exe'))) { throw 
 $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
 $env:JAVA_HOME = ''
 $env:CC = ''
+$env:LUAC_RUNTIME = (Join-Path $appDir 'runtime.h').Replace('\', '/')
 $jar = Join-Path $appDir 'app/LuaC-Studio.jar'
 $java = Join-Path $appDir 'runtime/bin/java.exe'
 $classPath = "$jar;$((Resolve-Path build/java-test).Path)"
