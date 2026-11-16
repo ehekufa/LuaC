@@ -16,6 +16,8 @@ import org.junit.runner.RunWith;
 public class DeviceApkBuildTest {
     @Test public void signsRunnableProjectOnDevice() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        assertNotEquals(0, context.getApplicationInfo().icon);
+        assertNotNull(context.getPackageManager().getApplicationIcon(context.getApplicationInfo()));
         File project = new File(context.getCacheDir(), "apk-device-project");
         if (project.exists()) ProjectFiles.delete(project);
         assertTrue(new File(project, "scripts").mkdirs());
@@ -33,6 +35,9 @@ public class DeviceApkBuildTest {
             ApkBuilder.build(template, project, unsigned, signed, key.key, key.certificate);
         }
         assertTrue(signed.length() > 0);
+        android.content.pm.PackageInfo packageInfo = context.getPackageManager().getPackageArchiveInfo(signed.getAbsolutePath(), 0);
+        assertNotNull(packageInfo);
+        assertNotEquals(0, packageInfo.applicationInfo.icon);
         String firstId = ApkIdentity.forProject(project);
         try (FileOutputStream out = new FileOutputStream(new File(project, "main.lua"))) {
             out.write("print('UPDATED APK DEVICE OK')\nworld = engine.world()\n".getBytes(StandardCharsets.UTF_8));

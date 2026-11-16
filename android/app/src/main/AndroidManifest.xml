@@ -5,6 +5,8 @@
     <application
         android:theme="@style/Theme.LuaC"
         android:label="LuaC Studio"
+        android:icon="@drawable/luac_logo"
+        android:roundIcon="@drawable/luac_logo"
         android:allowBackup="true"
         android:supportsRtl="true">
         <activity
