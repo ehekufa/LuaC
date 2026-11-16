@@ -359,11 +359,18 @@ jobs:
           mkdir -p dist/studio-windows/build
           cp luac.exe build/luac-gui.exe src/runtime.h src/luac_interpreter.h src/luac_love.h src/luac_compiled_project.h src/luac_pack.h src/luac_libraries.h src/luac_ffi.h src/luac_websocket.h src/luac_game.h src/luac_tls.h src/luac_audio.h README.md LICENSE dist/studio-windows/
           cp gui/third_party/Nuklear-LICENSE gui/FONT-LICENSE.txt dist/studio-windows/
-          cp /ucrt64/bin/glfw3.dll dist/studio-windows/
+          cp /ucrt64/bin/glfw3.dll /ucrt64/bin/libstdc++-6.dll /ucrt64/bin/libgcc_s_seh-1.dll /ucrt64/bin/libwinpthread-1.dll dist/studio-windows/
           if [ -f /ucrt64/bin/vulkan-1.dll ]; then cp /ucrt64/bin/vulkan-1.dll dist/studio-windows/; fi
+          mkdir -p dist/studio-windows/licenses
+          for component in libstdc++ libgcc libwinpthread gcc-libs cc-libs glfw vulkan-loader; do
+            if [ -d "/ucrt64/share/licenses/$component" ]; then cp -r "/ucrt64/share/licenses/$component" dist/studio-windows/licenses/; fi
+          done
           cp build/*.spv dist/studio-windows/build/
           cp -r src/third_party examples dist/studio-windows/
           7z a -tzip dist/LuaC-Studio-windows-x86_64.zip ./dist/studio-windows/*
+      - name: Test extracted Windows Studio without MSYS2 on PATH
+        shell: pwsh
+        run: ./tests/windows_studio_package.ps1
       - uses: actions/upload-artifact@v6
         with:
           name: LuaC-Studio-windows-x86_64

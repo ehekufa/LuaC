@@ -677,6 +677,11 @@ void scroll(GLFWwindow *window, double x, double y) {
 }
 
 int main(int argc, char **argv) {
+    // The package check runs before opening a window, including on headless CI.
+    if (argc == 2 && std::strcmp(argv[1], "--check-dependencies") == 0) {
+        std::cout << "LuaC Studio native dependencies loaded\n";
+        return 0;
+    }
     if (!glfwInit()) { std::cerr << "GLFW initialization failed\n"; return 1; }
     if (!glfwVulkanSupported()) { std::cerr << "Vulkan is not supported by this system\n"; glfwTerminate(); return 1; }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);

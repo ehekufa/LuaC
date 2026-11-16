@@ -158,10 +158,12 @@ Workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) запус
 | `LuaC-windows-x86_64` | `luac.exe`, статическая и динамическая библиотеки, headers |
 | `LuaC-linux-x86_64` | CLI, `libluac.a`, `libluac.so`, headers |
 | `LuaC-macos-arm64` | CLI, `libluac.a`, `libluac.dylib`, headers |
-| `LuaC-Studio-windows-x86_64` | Vulkan GUI `.exe`, shaders, GLFW DLL |
+| `LuaC-Studio-windows-x86_64` | Vulkan GUI `.exe`, shaders и необходимые DLL рядом с приложением |
 | `LuaC-Studio-linux-x86_64` | Vulkan GUI, CLI, shaders |
 | `LuaC-Studio-Android-APK` | устанавливаемый debug APK с проектами, многофайловым runtime, assets и game viewport |
 | `LuaC-Studio-Android-Release-APK` | release APK с вашей подписью, если настроены секреты |
+
+Windows Studio нужно запускать после распаковки всего ZIP: `luac-gui.exe`, DLL и папка `build` должны оставаться вместе. CI проверяет запуск проверки зависимостей из распакованного архива без MSYS2 в `PATH`; эта проверка не заменяет запуск Vulkan-интерфейса на вашей видеокарте.
 
 Для JIT/AOT на desktop нужен системный C-компилятор (`cc`, GCC или Clang). В APK синтаксическая проверка и генерация C выполняются внутри нативной библиотеки. **RUN** использует встроенный AST runtime поверх тех же native libraries, поэтому проекты запускаются на телефоне без host C toolchain.
 
