@@ -400,7 +400,27 @@ jobs:
         with:
           name: LuaC-windows-x86_64
           path: build/cli-artifact
-      - name: Build Java app and package runtime and TinyCC
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-mbedtls
+      - name: Copy portable GCC toolchain
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p build/portable-gcc/bin
+          cp /ucrt64/bin/*.dll build/portable-gcc/bin/
+          for tool in gcc.exe x86_64-w64-mingw32-gcc.exe as.exe ld.exe x86_64-w64-mingw32-as.exe x86_64-w64-mingw32-ld.exe; do
+            if [ -f "/ucrt64/bin/$tool" ]; then cp "/ucrt64/bin/$tool" build/portable-gcc/bin/; fi
+          done
+          cp -r /ucrt64/include /ucrt64/lib /ucrt64/libexec build/portable-gcc/
+          mkdir -p build/portable-gcc/share
+          cp -r /ucrt64/share/licenses build/portable-gcc/share/
+          du -sh build/portable-gcc
+      - name: Build Java app and package runtime and compilers
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -425,6 +445,7 @@ jobs:
           $cli = @(Get-ChildItem build/cli-unpacked -Recurse -Filter luac.exe)
           if ($cli.Count -ne 1) { throw 'Missing CLI package' }
           Copy-Item -Path (Join-Path $cli[0].DirectoryName '*') -Destination dist/java-image/LuaC-Studio -Recurse -Force
+          Copy-Item -Path build/portable-gcc -Destination dist/java-image/LuaC-Studio/gcc -Recurse -Force
           Compress-Archive -Path dist/java-image/LuaC-Studio -DestinationPath dist/LuaC-Studio-Java-windows-x86_64.zip
       - name: Test extracted app without installed Java or GCC
         shell: pwsh

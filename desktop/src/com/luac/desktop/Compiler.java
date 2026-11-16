@@ -15,15 +15,17 @@ final class Compiler {
     synchronized void start(Path project, String mode, Path source, Consumer<String> output, Consumer<Integer> done) throws IOException {
         if (process != null && process.isAlive()) throw new IOException("A program is already running");
         Path binary = home.resolve(windows() ? "luac.exe" : "luac");
+        Path gcc = home.resolve(windows() ? "gcc/bin/gcc.exe" : "gcc/bin/gcc");
         Path tcc = home.resolve(windows() ? "tcc/tcc.exe" : "tcc/bin/tcc");
-        if (!Files.isRegularFile(binary) || !Files.isRegularFile(tcc)) throw new IOException("Bundled LuaC or TinyCC is missing: " + home);
-        List<String> args = new ArrayList<>(Arrays.asList(binary.toString(), "--cc", tcc.toString(), mode, source.toString()));
+        Path bundledCompiler = Files.isRegularFile(gcc) ? gcc : tcc;
+        if (!Files.isRegularFile(binary) || !Files.isRegularFile(bundledCompiler)) throw new IOException("Bundled LuaC or C compiler is missing: " + home);
+        List<String> args = new ArrayList<>(Arrays.asList(binary.toString(), "--cc", bundledCompiler.toString(), mode, source.toString()));
         ProcessBuilder builder = new ProcessBuilder(args).directory(project.toFile()).redirectErrorStream(true);
         // A user's compiler flags or PATH must not silently replace the bundled toolchain.
         builder.environment().remove("CC"); builder.environment().remove("LUAC_CFLAGS"); builder.environment().remove("LUAC_LDFLAGS");
         builder.environment().put("LUAC_RUNTIME", home.resolve("runtime.h").toString().replace('\\', '/'));
         String path = builder.environment().getOrDefault("PATH", "");
-        builder.environment().put("PATH", home + File.pathSeparator + path);
+        builder.environment().put("PATH", bundledCompiler.getParent() + File.pathSeparator + home + File.pathSeparator + path);
         Process started = builder.start(); process = started;
         Thread reader = new Thread(() -> {
             int result = -1;
