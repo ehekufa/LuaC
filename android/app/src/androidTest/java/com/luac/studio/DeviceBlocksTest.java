@@ -79,9 +79,11 @@ public class DeviceBlocksTest {
         document.blocks.put(new org.json.JSONObject().put("type", "print").put("text", "A"));
         document.blocks.put(new org.json.JSONObject().put("type", "print").put("text", "B"));
         final int[][] positions = {null, null};
+        final BlockEditorView[] editorView = {null};
         try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
             activity.onActivity(screen -> {
                 BlockEditorView view = new BlockEditorView(screen, document, false);
+                editorView[0] = view;
                 screen.setContentView(view);
                 // Keep both endpoints on even the smallest emulator screen.
                 android.widget.LinearLayout content = (android.widget.LinearLayout) view.getChildAt(0);
@@ -122,7 +124,8 @@ public class DeviceBlocksTest {
             }
             send(instrumentation, down, android.view.MotionEvent.ACTION_UP, positions[1][0], positions[1][1]);
             instrumentation.waitForIdleSync();
-            assertEquals("B", document.blocks.getJSONObject(0).getString("text"));
+            assertEquals("trace=" + editorView[0].dragTrace + " positions=" + java.util.Arrays.deepToString(positions),
+                "B", document.blocks.getJSONObject(0).getString("text"));
             assertEquals("A", document.blocks.getJSONObject(1).getString("text"));
             assertTrue(document.dirty);
         }
