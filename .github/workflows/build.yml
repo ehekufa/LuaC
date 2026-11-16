@@ -432,9 +432,64 @@ jobs:
       - name: Clean up disposable signing key
         if: always()
         run: rm -f "$RUNNER_TEMP/luac-test.jks" android/app/build/outputs/apk/release-test/signingKey.jks
+      - name: Compile native project for Android emulator
+        run: |
+          make -j2 luac libraries
+          mkdir -p tests/.tmp android/app/build/outputs/apk/aot
+          cc -std=c99 -Isrc tests/bundle_codegen.c build/libluac.a -o tests/.tmp/bundle-codegen -ldl
+          tests/.tmp/bundle-codegen tests/.tmp/bundle-android.c
+          "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang" \
+            -std=gnu99 -O1 -DLUAC_STANDALONE tests/.tmp/bundle-android.c \
+            -o android/app/build/outputs/apk/aot/bundle-project -lm -ldl
+          ./luac --emit-c examples/compiled_project/main.lua -o tests/.tmp/generated.c
+          "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang" \
+            -std=gnu99 -O1 -Itests/.tmp -Isrc examples/compiled_project/host.c \
+            -o android/app/build/outputs/apk/aot/compiled-project -lm -ldl
+      - name: Package APK
+        run: mkdir -p dist && cp android/app/build/outputs/apk/debug/app-debug.apk dist/LuaC-Studio-debug.apk
+      - uses: actions/upload-artifact@v6
+        with:
+          name: LuaC-Studio-Android-APK
+          path: dist/LuaC-Studio-debug.apk
+      - uses: actions/upload-artifact@v6
+        with:
+          name: LuaC-Android-release-unsigned
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          retention-days: 2
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v6
+        with:
+          name: LuaC-Android-device-test-apks
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            android/app/build/outputs/apk/aot/compiled-project
+            android/app/build/outputs/apk/aot/bundle-project
+            android/app/build/outputs/apk/release-test/test-unsigned-signed.apk
+          retention-days: 2
+          if-no-files-found: error
+
+
+  android-release:
+    name: Sign Android release
+    runs-on: ubuntu-latest
+    needs: android
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/download-artifact@v7
+        with:
+          name: LuaC-Android-release-unsigned
+          path: release
+      - name: Ensure Android build tools
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;35.0.0'
       - name: Validate release signing configuration
         id: signing_config
-        if: github.event_name != 'pull_request'
         shell: bash
         env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
@@ -490,14 +545,14 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: 35.0.0
         with:
-          releaseDirectory: android/app/build/outputs/apk/release
+          releaseDirectory: release
           signingKeyBase64: ${{ secrets.SIGNING_KEY }}
           alias: ${{ secrets.ALIAS }}
           keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
           keyPassword: ${{ secrets.KEY_PASSWORD }}
       - name: Clean up release signing key
         if: always()
-        run: rm -f android/app/build/outputs/apk/release/signingKey.jks
+        run: rm -f release/signingKey.jks
       - name: Upload signed release APK
         if: steps.signing_config.outputs.enabled == 'true'
         uses: actions/upload-artifact@v6
@@ -506,36 +561,6 @@ jobs:
           path: ${{ steps.sign_release.outputs.signedReleaseFile }}
           if-no-files-found: error
 
-      - name: Compile native project for Android emulator
-        run: |
-          make -j2 luac libraries
-          mkdir -p tests/.tmp android/app/build/outputs/apk/aot
-          cc -std=c99 -Isrc tests/bundle_codegen.c build/libluac.a -o tests/.tmp/bundle-codegen -ldl
-          tests/.tmp/bundle-codegen tests/.tmp/bundle-android.c
-          "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang" \
-            -std=gnu99 -O1 -DLUAC_STANDALONE tests/.tmp/bundle-android.c \
-            -o android/app/build/outputs/apk/aot/bundle-project -lm -ldl
-          ./luac --emit-c examples/compiled_project/main.lua -o tests/.tmp/generated.c
-          "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang" \
-            -std=gnu99 -O1 -Itests/.tmp -Isrc examples/compiled_project/host.c \
-            -o android/app/build/outputs/apk/aot/compiled-project -lm -ldl
-      - name: Package APK
-        run: mkdir -p dist && cp android/app/build/outputs/apk/debug/app-debug.apk dist/LuaC-Studio-debug.apk
-      - uses: actions/upload-artifact@v6
-        with:
-          name: LuaC-Studio-Android-APK
-          path: dist/LuaC-Studio-debug.apk
-      - uses: actions/upload-artifact@v6
-        with:
-          name: LuaC-Android-device-test-apks
-          path: |
-            android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            android/app/build/outputs/apk/aot/compiled-project
-            android/app/build/outputs/apk/aot/bundle-project
-            android/app/build/outputs/apk/release-test/test-unsigned-signed.apk
-          retention-days: 2
-          if-no-files-found: error
 
 
   android-device:
