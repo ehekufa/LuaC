@@ -451,6 +451,38 @@ jobs:
           else
             echo 'enabled=true' >> "$GITHUB_OUTPUT"
           fi
+      - name: Validate release keystore
+        if: steps.signing_config.outputs.enabled == 'true'
+        shell: bash
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          ALIAS: ${{ secrets.ALIAS }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          work=$(mktemp -d "$RUNNER_TEMP/luac-keystore-check.XXXXXXXX")
+          trap 'rm -rf "$work"' EXIT
+          if ! printf '%s' "$SIGNING_KEY" | base64 --decode > "$work/key" || [[ ! -s "$work/key" ]]; then
+            echo '::error::SIGNING_KEY must be the Base64 contents of the complete keystore file.'
+            exit 1
+          fi
+          if ! keytool -list -keystore "$work/key" -storepass:env KEY_STORE_PASSWORD >/dev/null 2>&1; then
+            echo '::error::Cannot open keystore: check SIGNING_KEY and KEY_STORE_PASSWORD.'
+            exit 1
+          fi
+          if ! keytool -list -keystore "$work/key" -storepass:env KEY_STORE_PASSWORD -alias "$ALIAS" >/dev/null 2>&1; then
+            echo '::error::Signing alias not found: check ALIAS.'
+            exit 1
+          fi
+          export EFFECTIVE_KEY_PASSWORD="${KEY_PASSWORD:-$KEY_STORE_PASSWORD}"
+          if ! keytool -importkeystore -noprompt -srckeystore "$work/key" -srcstorepass:env KEY_STORE_PASSWORD \
+              -srcalias "$ALIAS" -srckeypass:env EFFECTIVE_KEY_PASSWORD -destkeystore "$work/test.p12" \
+              -deststoretype PKCS12 -deststorepass temporary-pass -destkeypass temporary-pass >/dev/null 2>&1; then
+            echo '::error::Cannot read the signing key: check KEY_PASSWORD and ensure ALIAS identifies a private key.'
+            exit 1
+          fi
       - name: Sign release APK
         id: sign_release
         if: steps.signing_config.outputs.enabled == 'true'
