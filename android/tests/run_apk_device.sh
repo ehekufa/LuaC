@@ -36,7 +36,7 @@ fi
 if [ "${LUAC_DEVICE_PREBUILT:-0}" = 1 ]; then
   test -f app/build/outputs/apk/aot/compiled-project
   test -f app/build/outputs/apk/aot/bundle-project
-  test -f app/build/outputs/apk/release-test/test-unsigned-signed.apk
+  test -f app/build/outputs/apk/release-test/test-signed.apk
 fi
 if [ -f app/build/outputs/apk/aot/compiled-project ]; then
   adb push app/build/outputs/apk/aot/compiled-project /data/local/tmp/luac-compiled-project
@@ -79,9 +79,9 @@ adb shell am start -n "$second/com.luac.studio.MainActivity"
 wait_for_output 'SECOND APK DEVICE OK'
 
 # Release is signed with a disposable CI key, independent of the debug certificate.
-if [ -f app/build/outputs/apk/release-test/test-unsigned-signed.apk ]; then
+if [ -f app/build/outputs/apk/release-test/test-signed.apk ]; then
   adb uninstall com.luac.studio
-  adb install app/build/outputs/apk/release-test/test-unsigned-signed.apk
+  adb install app/build/outputs/apk/release-test/test-signed.apk
   adb shell am start -n com.luac.studio/com.luac.studio.MainActivity
   wait_for_output 'LuaC Studio'
 fi
