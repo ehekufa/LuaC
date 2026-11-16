@@ -26,6 +26,7 @@ final class RuntimeView extends View {
     private final HashMap<String, Bitmap> textures = new HashMap<>();
     private final HashSet<String> missingTextures = new HashSet<>();
     private JSONObject frame;
+    private java.util.List<JSONObject> entities = java.util.Collections.emptyList();
     private double cameraX, cameraY, zoom = 1;
 
     RuntimeView(Context context, File project, TouchSink touchSink) {
@@ -38,6 +39,7 @@ final class RuntimeView extends View {
 
     void setFrame(JSONObject value) {
         frame = value;
+        entities = SceneLayers.ordered(value == null ? null : value.optJSONArray("entities"));
         if (value != null) {
             JSONObject camera = value.optJSONObject("camera");
             if (camera != null) {
@@ -74,11 +76,7 @@ final class RuntimeView extends View {
             canvas.drawText("Starting project…", 24, 42, paint);
             return;
         }
-        JSONArray entities = frame.optJSONArray("entities");
-        if (entities != null) for (int index = 0; index < entities.length(); ++index) {
-            JSONObject entity = entities.optJSONObject(index);
-            if (entity != null) drawEntity(canvas, entity);
-        }
+        for (JSONObject entity : entities) drawEntity(canvas, entity);
         JSONArray texts = frame.optJSONArray("texts");
         if (texts != null) for (int index = 0; index < texts.length(); ++index) {
             JSONObject text = texts.optJSONObject(index);
@@ -143,7 +141,10 @@ final class RuntimeView extends View {
         canvas.rotate((float) entity.optDouble("rotation"), x, y);
         String path = entity.optString("texture", "");
         Bitmap bitmap = path.isEmpty() || path.equals("null") ? null : texture(path);
-        if (bitmap != null) canvas.drawBitmap(bitmap, null, rectangle, paint);
+        if (bitmap != null) {
+            paint.setColor(Color.WHITE);
+            canvas.drawBitmap(bitmap, null, rectangle, paint);
+        }
         else {
             int color = color(entity.optJSONArray("color"));
             paint.setColor(color);

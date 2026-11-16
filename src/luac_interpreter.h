@@ -675,6 +675,7 @@ static void li_json_scene(LiSession *session, Str *json) {
             if (!first) sb_add(json,","); first = 0;
             sb_add(json,"{");sb_add(json,"\"x\":");sb_printf(json,"%.8g",li_number_field(ctx,entity,"x",0));
             sb_add(json,",\"y\":");sb_printf(json,"%.8g",li_number_field(ctx,entity,"y",0));
+            sb_add(json,",\"z\":");sb_printf(json,"%.8g",li_number_field(ctx,entity,"z",0));
             sb_add(json,",\"width\":");sb_printf(json,"%.8g",li_number_field(ctx,entity,"width",32));
             sb_add(json,",\"height\":");sb_printf(json,"%.8g",li_number_field(ctx,entity,"height",32));
             sb_add(json,",\"rotation\":");sb_printf(json,"%.8g",li_number_field(ctx,entity,"rotation",0));

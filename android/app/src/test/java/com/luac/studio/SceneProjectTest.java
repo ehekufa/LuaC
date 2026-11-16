@@ -29,6 +29,12 @@ public class SceneProjectTest {
         assertTrue(generated.contains("engine.create(world, \"Кот \\\"Мяу\\\"\", 0, 0)"));
         assertTrue(generated.contains("require('actors." + id + "')"));
         assertTrue(generated.contains("engine.set_sprite(sprite"));
+        assertTrue(generated.contains("background.z = -1"));
+        // Earlier generated scenes are upgraded only when their body is unchanged.
+        File sceneFile = new File(project, "scene.lua");
+        store.write(sceneFile, generated.replace("background.z = -1\n", ""));
+        SceneProject.open(store, project);
+        assertEquals(generated, store.read(sceneFile));
         assertEquals(lua, store.read(script));
         ByteArrayOutputStream archive = new ByteArrayOutputStream();
         store.exportProject(project, archive);

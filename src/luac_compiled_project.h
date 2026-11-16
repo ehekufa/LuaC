@@ -171,6 +171,7 @@ static void lc_compiled_json_scene(LcCompiledProject *project, LcCompiledJson *o
         first = 0;
         lc_compiled_json_text(out, "{\"x\":"); lc_compiled_json_field(out, ctx, entity, "x", 0);
         lc_compiled_json_text(out, ",\"y\":"); lc_compiled_json_field(out, ctx, entity, "y", 0);
+        lc_compiled_json_text(out, ",\"z\":"); lc_compiled_json_field(out, ctx, entity, "z", 0);
         lc_compiled_json_text(out, ",\"width\":"); lc_compiled_json_field(out, ctx, entity, "width", 32);
         lc_compiled_json_text(out, ",\"height\":"); lc_compiled_json_field(out, ctx, entity, "height", 32);
         lc_compiled_json_text(out, ",\"rotation\":"); lc_compiled_json_field(out, ctx, entity, "rotation", 0);
