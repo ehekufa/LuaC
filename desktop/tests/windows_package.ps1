@@ -25,6 +25,19 @@ $results = & $java '-Dfile.encoding=UTF-8' -cp $classPath com.luac.desktop.Deskt
 $exitCode = $LASTEXITCODE
 $results | ForEach-Object { Write-Output "$_" }
 if ($exitCode -ne 0) { throw "Packaged GUI/native compiler test failed: $($results -join ' ')" }
+# AOT exercises the standalone linker path (different startup objects from JIT).
+$env:CPATH = Join-Path $appDir 'gcc/include'
+$env:LIBRARY_PATH = Join-Path $appDir 'gcc/lib'
+$env:PATH = "$(Join-Path $appDir 'gcc/bin');$appDir;$env:SystemRoot\System32;$env:SystemRoot"
+$src = Join-Path $work 'standalone.lua'
+$exe = Join-Path $work 'standalone.exe'
+Set-Content -LiteralPath $src -Value "print('PORTABLE GCC AOT OK')" -Encoding utf8
+$aot = & (Join-Path $appDir 'luac.exe') --cc (Join-Path $appDir 'gcc/bin/gcc.exe') --aot $src -o $exe 2>&1
+if ($LASTEXITCODE -ne 0) { throw "Portable GCC AOT failed: $($aot -join ' ')" }
+$aotResult = & $exe 2>&1
+if ($LASTEXITCODE -ne 0 -or ($aotResult -join ' ') -notmatch 'PORTABLE GCC AOT OK') { throw "Portable GCC executable failed: $($aotResult -join ' ')" }
+# Restore the clean PATH before starting the launcher.
+$env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
 # Also test the actual double-clickable launcher, independently of system Java.
 $marker = Join-Path $work 'launcher-ready.txt'
 $stdout = Join-Path $work 'launcher-stdout.txt'

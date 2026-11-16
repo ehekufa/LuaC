@@ -421,7 +421,6 @@ jobs:
           }
           trap 'report_error "$LINENO"' ERR
           mkdir -p build/portable-gcc/bin
-          cp /ucrt64/bin/*.dll build/portable-gcc/bin/
           for tool in gcc.exe x86_64-w64-mingw32-gcc.exe as.exe ld.exe x86_64-w64-mingw32-as.exe x86_64-w64-mingw32-ld.exe; do
             if [ -f "/ucrt64/bin/$tool" ]; then cp "/ucrt64/bin/$tool" build/portable-gcc/bin/; fi
           done
@@ -431,14 +430,28 @@ jobs:
           rm -rf build/portable-gcc/include/c++
           mkdir -p build/portable-gcc/lib
           cp -r /ucrt64/lib/gcc build/portable-gcc/lib/
-          find build/portable-gcc/lib/gcc -type f \( -name 'cc1plus.exe' -o -name 'lto1.exe' -o -name 'libstdc++*' -o -name 'libgfortran*' -o -name 'libgomp*' -o -name 'liblto_plugin*' \) -delete
+          find build/portable-gcc/lib/gcc -type f \( -name 'cc1plus.exe' -o -name 'lto1.exe' -o -name 'libstdc++*' -o -name 'libgfortran*' -o -name 'libgomp*' \) -delete
           for pattern in '*.o' libmingw*.a libmoldname*.a libmsvcrt*.a libucrt*.a libpthread*.a libwinpthread*.a libkernel32*.a libuser32*.a libadvapi32*.a libshell32*.a libole32*.a liboleaut32*.a libuuid*.a libws2_32*.a libcrypt32*.a libbcrypt*.a libgdi32*.a libwinmm*.a libavrt*.a libiphlpapi*.a libntdll*.a libsecur32*.a libmbed*.a; do
             for file in /ucrt64/lib/$pattern; do [ ! -f "$file" ] || cp "$file" build/portable-gcc/lib/; done
           done
           if [ -d /ucrt64/libexec ]; then cp -r /ucrt64/libexec build/portable-gcc/; fi
+          # Copy only UCRT DLLs actually imported by the compiler/linker, including
+          # their transitive dependencies. Windows system DLLs are not bundled.
+          while :; do
+            before=$(find build/portable-gcc/bin -iname '*.dll' | wc -l)
+            while IFS= read -r exe; do
+              while IFS= read -r dep; do
+                [ ! -f "/ucrt64/bin/$dep" ] || [ -f "build/portable-gcc/bin/$dep" ] || cp "/ucrt64/bin/$dep" build/portable-gcc/bin/
+              done < <(objdump -p "$exe" 2>/dev/null | sed -n 's/^[[:space:]]*DLL Name: //p' || true)
+            done < <(find build/portable-gcc/bin build/portable-gcc/lib/gcc -type f \( -iname '*.exe' -o -iname '*.dll' \))
+            after=$(find build/portable-gcc/bin -iname '*.dll' | wc -l)
+            [ "$before" != "$after" ] || break
+          done
           mkdir -p build/portable-gcc/share
           cp -r /ucrt64/share/licenses build/portable-gcc/share/
           du -sh build/portable-gcc
+          sizes=$(du -sh build/portable-gcc/bin build/portable-gcc/include build/portable-gcc/lib build/portable-gcc/share | tr '\r\n' ' ')
+          echo "::notice::Portable GCC components: $sizes"
       - name: Build Java app and package runtime and compilers
         shell: pwsh
         run: |
