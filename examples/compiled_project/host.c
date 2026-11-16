@@ -8,9 +8,17 @@ int main(void) {
     LcCompiledProject *other = lc_compiled_open("other project");
     LcValue hero, world, engine, touch, result, args[2];
     double x;
+    char *frame;
     if (!project || !other || project->ctx->error || other->ctx->error) return 1;
     if (!project->ctx->captured_output || !strstr(project->ctx->captured_output, "Compiled project ready")) return 2;
-    if (!lc_compiled_step(project, .5) || !lc_compiled_touch(project, 3, 40, 50, 1)) return 3;
+    frame = lc_compiled_frame(project, 0);
+    if (!frame || !strstr(frame, "\"ok\":true") || !strstr(frame, "Compiled project ready") ||
+        !strstr(frame, "\"width\":24")) { free(frame); return 7; }
+    free(frame);
+    frame = lc_compiled_frame(project, .5);
+    if (!frame || !strstr(frame, "\"output\":\"\"") || !strstr(frame, "\"x\":5")) { free(frame); return 8; }
+    free(frame);
+    if (!lc_compiled_touch(project, 3, 40, 50, 1)) return 3;
     hero = lc_compiled_global(other, "hero");
     x = lc_engine_number(other->ctx, hero, "x", -1);
     lc_release(other->ctx, hero);

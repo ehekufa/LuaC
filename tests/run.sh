@@ -115,10 +115,15 @@ cmp tests/.tmp/bundle-expected.out tests/.tmp/bundle.out
 ./luac --emit-c examples/compiled_project/main.lua -o tests/.tmp/generated.c >/dev/null
 cc -std=gnu99 -O1 -Itests/.tmp -Isrc examples/compiled_project/host.c -o tests/.tmp/compiled-project -lm
 ./tests/.tmp/compiled-project
+cc -std=gnu99 -O1 -Itests/.tmp -Isrc tests/compiled_frame.c -o tests/.tmp/compiled-frame -lm
+python3 tests/compiled_frame_test.py tests/.tmp/compiled-frame
 if [ "${SANITIZE:-0}" = 1 ]; then
   cc -std=gnu99 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
     -Itests/.tmp -Isrc examples/compiled_project/host.c -o tests/.tmp/compiled-project-san -lm
   ASAN_OPTIONS=detect_leaks=1 tests/.tmp/compiled-project-san
+  cc -std=gnu99 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -Itests/.tmp -Isrc tests/compiled_frame.c -o tests/.tmp/compiled-frame-san -lm
+  ASAN_OPTIONS=detect_leaks=1 python3 tests/compiled_frame_test.py tests/.tmp/compiled-frame-san
 fi
 
 ./luac --emit-c examples/demo.lua -o tests/.tmp/demo.c >/dev/null
