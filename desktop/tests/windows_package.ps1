@@ -1,4 +1,9 @@
 $ErrorActionPreference = 'Stop'
+trap {
+    $message = ($_ | Out-String).Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' ')
+    Write-Output "::error file=desktop/tests/windows_package.ps1::$message"
+    exit 1
+}
 $work = Join-Path $env:RUNNER_TEMP 'LuaC Java Studio package test'
 if (Test-Path $work) { Remove-Item -Force -Recurse $work }
 Expand-Archive -LiteralPath 'dist/LuaC-Studio-Java-windows-x86_64.zip' -DestinationPath $work
@@ -13,8 +18,11 @@ $env:CC = ''
 $jar = Join-Path $home 'app/LuaC-Studio.jar'
 $java = Join-Path $home 'runtime/bin/java.exe'
 $classPath = "$jar;$((Resolve-Path build/java-test).Path)"
-& $java '-Dfile.encoding=UTF-8' -cp $classPath com.luac.desktop.DesktopTest $home '--gui'
-if ($LASTEXITCODE -ne 0) { throw 'Packaged GUI/native compiler test failed' }
+$env:LUAC_TRACE = '1'
+$results = & $java '-Dfile.encoding=UTF-8' -cp $classPath com.luac.desktop.DesktopTest $home '--gui' 2>&1
+$exitCode = $LASTEXITCODE
+$results | ForEach-Object { Write-Output "$_" }
+if ($exitCode -ne 0) { throw "Packaged GUI/native compiler test failed: $($results -join ' ')" }
 # Also test the actual double-clickable launcher, independently of system Java.
 $proc = Start-Process -FilePath (Join-Path $home 'LuaC-Studio.exe') -PassThru
 try {

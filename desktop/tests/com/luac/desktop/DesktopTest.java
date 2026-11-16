@@ -35,7 +35,10 @@ public final class DesktopTest {
             try { store.createFile(dir, "other2.lua"); throw new AssertionError("overwrote file"); } catch (IOException expected) { }
             store.save(project.resolve("main.lua"), "local g = require('scripts.greeting')\nprint(g.message)\n");
             Compiler compiler = new Compiler(home);
-            check(run(compiler, project, "--jit", Paths.get("main.lua"), false).contains("Hello from LuaC!"), "native output missing");
+            String nativeOutput = run(compiler, project, "--jit", Paths.get("main.lua"), false);
+            check(nativeOutput.contains("Hello from LuaC!"), "native output missing");
+            if (System.getenv("LUAC_TRACE") != null && Files.exists(home.resolve("gcc/bin/gcc.exe")))
+                check(nativeOutput.contains("gcc.exe"), "bundled GCC was not used: " + nativeOutput);
             run(compiler, project, "--check", project.resolve("main.lua"), false);
             store.save(project.resolve("main.lua"), "print('BEGIN')\nwhile true do end\n");
             run(compiler, project, "--jit", Paths.get("main.lua"), true);

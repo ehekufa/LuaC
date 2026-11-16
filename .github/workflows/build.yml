@@ -410,13 +410,23 @@ jobs:
       - name: Copy portable GCC toolchain
         shell: msys2 {0}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
+          log="$PWD/portable-gcc.log"
+          exec > >(tee "$log") 2>&1
+          report_error() {
+            status=$?; trap - ERR
+            message=$(tail -c 5000 "$log" | tr '\r\n' '  ' | sed 's/%/%25/g')
+            printf '::error file=.github/workflows/build.yml::Portable GCC line %s: %s\n' "$1" "$message"
+            exit "$status"
+          }
+          trap 'report_error "$LINENO"' ERR
           mkdir -p build/portable-gcc/bin
           cp /ucrt64/bin/*.dll build/portable-gcc/bin/
           for tool in gcc.exe x86_64-w64-mingw32-gcc.exe as.exe ld.exe x86_64-w64-mingw32-as.exe x86_64-w64-mingw32-ld.exe; do
             if [ -f "/ucrt64/bin/$tool" ]; then cp "/ucrt64/bin/$tool" build/portable-gcc/bin/; fi
           done
-          cp -r /ucrt64/include /ucrt64/lib /ucrt64/libexec build/portable-gcc/
+          cp -r /ucrt64/include /ucrt64/lib build/portable-gcc/
+          if [ -d /ucrt64/libexec ]; then cp -r /ucrt64/libexec build/portable-gcc/; fi
           mkdir -p build/portable-gcc/share
           cp -r /ucrt64/share/licenses build/portable-gcc/share/
           du -sh build/portable-gcc
