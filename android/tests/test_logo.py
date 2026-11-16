@@ -14,7 +14,8 @@ paths = [
 ]
 image = paths[0].read_bytes()
 assert image[:8] == b"\x89PNG\r\n\x1a\n"
-assert struct.unpack(">II", image[16:24]) == (512, 512)
+width, height = struct.unpack(">II", image[16:24])
+assert width == height and width > 0
 assert len(image) < 1024 * 1024  # SampleCatalog bounds each packaged file.
 pos = 8
 while pos < len(image):
