@@ -475,6 +475,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: android
     if: github.event_name != 'pull_request'
+    outputs:
+      signed: ${{ steps.signing_config.outputs.enabled }}
     steps:
       - uses: actions/setup-java@v5
         with:
@@ -553,12 +555,21 @@ jobs:
       - name: Clean up release signing key
         if: always()
         run: rm -f release/signingKey.jks
+      - name: Verify and package signed APK
+        if: steps.signing_config.outputs.enabled == 'true'
+        env:
+          SIGNED_APK: ${{ steps.sign_release.outputs.signedReleaseFile }}
+        run: |
+          mkdir -p release-ready
+          cp "$SIGNED_APK" release-ready/LuaC-Studio-release.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose release-ready/LuaC-Studio-release.apk
+          sha256sum release-ready/LuaC-Studio-release.apk | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload signed release APK
         if: steps.signing_config.outputs.enabled == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: LuaC-Studio-Android-Release-APK
-          path: ${{ steps.sign_release.outputs.signedReleaseFile }}
+          path: release-ready/LuaC-Studio-release.apk
           if-no-files-found: error
 
 
@@ -566,7 +577,8 @@ jobs:
   android-device:
     name: Android device API ${{ matrix.api }}
     runs-on: ubuntu-latest
-    needs: android
+    needs: [android, android-release]
+    if: ${{ always() && needs.android.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -583,6 +595,12 @@ jobs:
         with:
           name: LuaC-Android-device-test-apks
           path: android/app/build/outputs/apk
+      - name: Download published release APK
+        if: ${{ needs.android-release.result == 'success' && needs.android-release.outputs.signed == 'true' }}
+        uses: actions/download-artifact@v7
+        with:
+          name: LuaC-Studio-Android-Release-APK
+          path: android/app/build/outputs/apk/release-published
       - name: Ensure Android build tools
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
@@ -599,4 +617,4 @@ jobs:
           arch: x86_64
           target: ${{ matrix.target }}
           disable-animations: true
-          script: cd android && LUAC_DEVICE_PREBUILT=1 bash tests/run_apk_device.sh
+          script: cd android && LUAC_DEVICE_PREBUILT=1 LUAC_EXPECT_RELEASE=${{ needs.android-release.result == 'success' && needs.android-release.outputs.signed == 'true' && '1' || '0' }} bash tests/run_apk_device.sh

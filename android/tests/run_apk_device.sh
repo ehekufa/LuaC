@@ -85,3 +85,14 @@ if [ -f app/build/outputs/apk/release-test/test-unsigned-signed.apk ]; then
   adb shell am start -n com.luac.studio/com.luac.studio.MainActivity
   wait_for_output 'LuaC Studio'
 fi
+
+# Also install the exact published release when repository signing is configured.
+release=app/build/outputs/apk/release-published/LuaC-Studio-release.apk
+if [ "${LUAC_EXPECT_RELEASE:-0}" = 1 ]; then test -f "$release"; fi
+if [ -f "$release" ]; then
+  "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$release"
+  adb uninstall com.luac.studio
+  adb install "$release"
+  adb shell am start -n com.luac.studio/com.luac.studio.MainActivity
+  wait_for_output 'LuaC Studio'
+fi
