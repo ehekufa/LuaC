@@ -150,7 +150,7 @@ print(next(5), next(2)) -- 15  17
 
 ## Готовые сборки через GitHub Actions
 
-Workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) запускается на `push`, `pull_request` и вручную через **Actions → Native builds → Run workflow**. После успешного прогона артефакты доступны на странице workflow:
+Workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) запускается на `push`, `pull_request` и вручную через **Actions → Nightly builds → Run workflow**. После успешного прогона артефакты доступны на странице workflow:
 
 | Артефакт | Содержимое |
 |---|---|
@@ -160,7 +160,8 @@ Workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) запус
 | `LuaC-macos-arm64` | CLI, `libluac.a`, `libluac.dylib`, headers |
 | `LuaC-Studio-windows-x86_64` | Vulkan GUI `.exe`, shaders, GLFW DLL |
 | `LuaC-Studio-linux-x86_64` | Vulkan GUI, CLI, shaders |
-| `LuaC-Studio-Android-APK` | устанавливаемый APK с проектами, многофайловым runtime, assets и game viewport |
+| `LuaC-Studio-Android-APK` | устанавливаемый debug APK с проектами, многофайловым runtime, assets и game viewport |
+| `LuaC-Studio-Android-Release-APK` | release APK с вашей подписью, если настроены секреты |
 
 Для JIT/AOT на desktop нужен системный C-компилятор (`cc`, GCC или Clang). В APK синтаксическая проверка и генерация C выполняются внутри нативной библиотеки. **RUN** использует встроенный AST runtime поверх тех же native libraries, поэтому проекты запускаются на телефоне без host C toolchain.
 
@@ -219,6 +220,8 @@ Standalone APK использует те же поддерживаемые фу�
 ### Nightly builds
 
 Workflow **Nightly builds** проверяет изменения и публикует артефакты; также задан ежедневный запуск в 02:00 UTC. GitHub запускает расписание только из workflow на основной ветке, поэтому автоматический nightly заработает после попадания изменений в неё. Это сборка Studio и нативных инструментов, не APK пользовательского проекта.
+
+Для подписанного **release APK самой Studio** настройте в GitHub Actions secrets репозитория `SIGNING_KEY` (Base64 от файла keystore), `ALIAS`, `KEY_STORE_PASSWORD` и при необходимости `KEY_PASSWORD` (если отличается от пароля keystore). Не отправляйте ключи и пароли в чат. Подписание выполняется только для запусков, отличных от pull request; при отсутствии всех секретов выпускается только debug-артефакт, а неполный набор обязательных секретов вызывает ошибку. Используется закреплённый commit `r0adkll/sign-android-release` с Node 24 и Android Build Tools 35.0.0. Этот action проверяет выравнивание APK внешним `zipalign -c` перед подписью и проверяет подпись через `apksigner`. Внутренняя сборка APK пользовательского проекта при этом не меняется. Подписанный release имеет другой сертификат, чем debug APK, поэтому Android не позволит обновить один другим без удаления приложения (и его локальных данных); храните release-ключ для последующих обновлений. CI дополнительно проверяет action на одноразовом тестовом ключе и устанавливает полученный APK на эмуляторах; этот ключ не используется для публикации.
 
 ### Пакеты примеров
 

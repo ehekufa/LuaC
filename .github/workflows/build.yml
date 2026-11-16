@@ -400,13 +400,80 @@ jobs:
         working-directory: android
         shell: bash
         run: |
-          if ! gradle --no-daemon testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest > android-build.log 2>&1; then
+          if ! gradle --no-daemon testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease > android-build.log 2>&1; then
             message=$(grep -E '(^|[ :])error:|undefined reference|undefined symbol|FAILURE:|^e:' android-build.log | tail -c 3000 | tr '\r\n' '  ' || true)
             echo "::error file=android/app/build.gradle::${message}"
             tail -100 android-build.log
             exit 1
           fi
           tail -20 android-build.log
+      # Exercise the exact action even when the repository has no release secrets.
+      - name: Prepare disposable signing key
+        id: test_key
+        shell: bash
+        run: |
+          mkdir -p android/app/build/outputs/apk/release-test
+          cp android/app/build/outputs/apk/release/app-release-unsigned.apk android/app/build/outputs/apk/release-test/test-unsigned.apk
+          keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/luac-test.jks" -storetype JKS \
+            -storepass test-password -keypass test-password -alias test-key \
+            -keyalg RSA -keysize 2048 -validity 2 -dname 'CN=LuaC CI test'
+          echo "key=$(base64 -w 0 "$RUNNER_TEMP/luac-test.jks")" >> "$GITHUB_OUTPUT"
+      - name: Test APK signing action with disposable key
+        id: test_sign
+        uses: r0adkll/sign-android-release@d5f8436b702872ad5cdb1e6e4d5c8b983d25a997 # Node 24
+        env:
+          BUILD_TOOLS_VERSION: 35.0.0
+        with:
+          releaseDirectory: android/app/build/outputs/apk/release-test
+          signingKeyBase64: ${{ steps.test_key.outputs.key }}
+          alias: test-key
+          keyStorePassword: test-password
+          keyPassword: test-password
+      - name: Clean up disposable signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/luac-test.jks" android/app/build/outputs/apk/release-test/signingKey.jks
+      - name: Validate release signing configuration
+        id: signing_config
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          ALIAS: ${{ secrets.ALIAS }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [[ -z "$SIGNING_KEY$ALIAS$KEY_STORE_PASSWORD$KEY_PASSWORD" ]]; then
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::Release signing skipped: repository signing secrets are not configured.'
+          elif [[ -z "$SIGNING_KEY" || -z "$ALIAS" || -z "$KEY_STORE_PASSWORD" ]]; then
+            echo '::error::Set SIGNING_KEY, ALIAS and KEY_STORE_PASSWORD together. KEY_PASSWORD is optional.'
+            exit 1
+          else
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Sign release APK
+        id: sign_release
+        if: steps.signing_config.outputs.enabled == 'true'
+        uses: r0adkll/sign-android-release@d5f8436b702872ad5cdb1e6e4d5c8b983d25a997 # Node 24
+        env:
+          BUILD_TOOLS_VERSION: 35.0.0
+        with:
+          releaseDirectory: android/app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+      - name: Clean up release signing key
+        if: always()
+        run: rm -f android/app/build/outputs/apk/release/signingKey.jks
+      - name: Upload signed release APK
+        if: steps.signing_config.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: LuaC-Studio-Android-Release-APK
+          path: ${{ steps.sign_release.outputs.signedReleaseFile }}
+          if-no-files-found: error
+
       - name: Compile native project for Android emulator
         run: |
           make -j2 luac libraries
@@ -434,6 +501,7 @@ jobs:
             android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             android/app/build/outputs/apk/aot/compiled-project
             android/app/build/outputs/apk/aot/bundle-project
+            android/app/build/outputs/apk/release-test/test-unsigned-signed.apk
           retention-days: 2
           if-no-files-found: error
 
