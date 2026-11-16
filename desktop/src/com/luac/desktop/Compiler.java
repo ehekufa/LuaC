@@ -23,6 +23,15 @@ final class Compiler {
         ProcessBuilder builder = new ProcessBuilder(args).directory(project.toFile()).redirectErrorStream(true);
         // A user's compiler flags or PATH must not silently replace the bundled toolchain.
         builder.environment().remove("CC"); builder.environment().remove("LUAC_CFLAGS"); builder.environment().remove("LUAC_LDFLAGS");
+        // MSYS2 GCC is relocated into the app image rather than installed at
+        // /ucrt64. Give it the portable headers and import libraries explicitly.
+        if (bundledCompiler.equals(gcc)) {
+            builder.environment().remove("GCC_EXEC_PREFIX");
+            builder.environment().remove("COMPILER_PATH");
+            builder.environment().remove("C_INCLUDE_PATH");
+            builder.environment().put("CPATH", home.resolve("gcc/include").toString());
+            builder.environment().put("LIBRARY_PATH", home.resolve("gcc/lib").toString());
+        }
         builder.environment().put("LUAC_RUNTIME", home.resolve("runtime.h").toString().replace('\\', '/'));
         String path = builder.environment().getOrDefault("PATH", "");
         builder.environment().put("PATH", bundledCompiler.getParent() + File.pathSeparator + home + File.pathSeparator + path);
