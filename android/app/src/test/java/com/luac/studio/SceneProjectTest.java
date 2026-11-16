@@ -44,6 +44,13 @@ public class SceneProjectTest {
         assertEquals("assets/look.png", restored.background());
         assertEquals(lua, store.read(restored.script(id)));
         assertEquals(generated, store.read(new File(imported, "scene.lua")));
+        restored.renameActor(id, "Renamed");
+        assertEquals("Renamed", SceneProject.open(store, imported).actor(id).getString("name"));
+        restored.removeActor(id);
+        assertEquals(0, SceneProject.open(store, imported).actors().length());
+        assertFalse(restored.script(id).exists());
+        assertTrue(new File(imported, "assets/look.png").exists());
+        assertEquals(lua, store.read(script));
     }
 
     @Test public void editsAreNotOverwrittenAndInvalidImagesAreRejected() throws Exception {

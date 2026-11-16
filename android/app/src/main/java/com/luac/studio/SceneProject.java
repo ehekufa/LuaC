@@ -96,6 +96,31 @@ final class SceneProject {
         }
         return id;
     }
+    void renameActor(String id, String name) throws IOException {
+        name = name == null ? "" : name.trim();
+        if (name.isEmpty() || name.length() > 100) throw new IOException("Actor name must contain 1–100 characters");
+        try {
+            JSONObject actor = actor(id);
+            String previous = actor.getString("name");
+            actor.put("name", name);
+            try { save(); } catch (IOException error) { actor.put("name", previous); throw error; }
+        } catch (JSONException error) { throw new IOException("Cannot rename actor", error); }
+    }
+    void removeActor(String id) throws IOException {
+        actor(id); // Validate before touching the generated scene.
+        JSONArray old = actors(), remaining = new JSONArray();
+        for (int i = 0; i < old.length(); i++) {
+            JSONObject item = old.optJSONObject(i);
+            if (!id.equals(item.optString("id"))) remaining.put(item);
+        }
+        try {
+            data.put("actors", remaining);
+            try { save(); } catch (IOException error) { data.put("actors", old); throw error; }
+        } catch (JSONException error) { throw new IOException("Cannot remove actor", error); }
+        File script = script(id);
+        if (script.exists() && !script.delete())
+            throw new IOException("Actor removed, but its script could not be deleted: " + script.getName());
+    }
     void setLook(String id, String path) throws IOException {
         validateLook(path);
         if (!path.isEmpty() && !store.resolve(project, path).isFile()) throw new IOException("Image not found");

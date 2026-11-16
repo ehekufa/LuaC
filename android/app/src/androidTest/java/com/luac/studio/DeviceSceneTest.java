@@ -90,6 +90,16 @@ public class DeviceSceneTest {
             assertTrue(output[0], output[0].contains("scene actor works"));
             activity.onActivity(MainActivity::onBackPressed);
             onView(withText("Hero")).check(matches(isDisplayed()));
+            onView(withText("Hero")).perform(click());
+            onView(withText("Rename actor")).perform(click());
+            onView(withId(R.id.input)).perform(replaceText("Hero 2"), closeSoftKeyboard());
+            onView(withText("Save")).perform(click());
+            pressBack();
+            onView(withText("Hero 2")).perform(click());
+            onView(withText("Delete actor")).perform(click());
+            onView(withText("Delete")).perform(click());
+            assertEquals(0, SceneProject.open(store, project).actors().length());
+            assertFalse(scene.script(id).exists());
         } finally {
             StudioTheme.saveLanguage(context, language); StudioTheme.saveBlocks(context, mode);
             store.delete(project);

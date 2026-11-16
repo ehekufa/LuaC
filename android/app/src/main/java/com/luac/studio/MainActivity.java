@@ -419,6 +419,19 @@ public final class MainActivity extends AppCompatActivity {
         TextView current = new TextView(this); current.setTextColor(Color.WHITE);
         current.setText(tr("Look: ", "Образ: ") + (look.isEmpty() ? tr("none", "нет") : look)); content.addView(current);
         content.addView(sceneButton(tr("Choose look from assets", "Выбрать образ из assets"), () -> chooseSceneLook(scene, id)));
+        if (!id.equals("background")) {
+            content.addView(sceneButton(tr("Rename actor", "Переименовать актёра"), () ->
+                nameDialog(tr("Rename actor", "Переименовать актёра"), name, tr("Actor name", "Имя актёра"), tr("Save", "Сохранить"), value -> {
+                    try { scene.renameActor(id, value); showSceneObject(id); } catch (Exception error) { toast(error); }
+                })));
+            content.addView(sceneButton(tr("Delete actor", "Удалить актёра"), () ->
+                new MaterialAlertDialogBuilder(this).setTitle(tr("Delete actor?", "Удалить актёра?"))
+                    .setMessage(tr("Its script will be deleted. Image assets will be kept.", "Скрипт будет удалён. Изображения останутся в assets."))
+                    .setPositiveButton(tr("Delete", "Удалить"), (dialog, which) -> {
+                        try { scene.removeActor(id); showScene(); }
+                        catch (Exception error) { toast(error); showScene(); }
+                    }).setNegativeButton(tr("Cancel", "Отмена"), null).show()));
+        }
     }
 
     private void chooseSceneLook(SceneProject scene, String id) {
