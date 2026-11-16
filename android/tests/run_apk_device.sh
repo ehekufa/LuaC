@@ -35,11 +35,17 @@ fi
 # Prebuilt CI runs must exercise the native project; local runs may omit it.
 if [ "${LUAC_DEVICE_PREBUILT:-0}" = 1 ]; then
   test -f app/build/outputs/apk/aot/compiled-project
+  test -f app/build/outputs/apk/aot/bundle-project
 fi
 if [ -f app/build/outputs/apk/aot/compiled-project ]; then
   adb push app/build/outputs/apk/aot/compiled-project /data/local/tmp/luac-compiled-project
   adb shell chmod 755 /data/local/tmp/luac-compiled-project
   adb shell /data/local/tmp/luac-compiled-project | grep -F 'Compiled project without interpreter: OK'
+fi
+if [ -f app/build/outputs/apk/aot/bundle-project ]; then
+  adb push app/build/outputs/apk/aot/bundle-project /data/local/tmp/luac-bundle-project
+  adb shell chmod 755 /data/local/tmp/luac-bundle-project
+  adb shell /data/local/tmp/luac-bundle-project | grep -F 'Compiled bundle: OK'
 fi
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk

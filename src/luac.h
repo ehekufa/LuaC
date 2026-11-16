@@ -21,6 +21,23 @@ extern "C" {
 LUAC_API char *luac_compile_c(const char *source, const char *filename,
                               char **error_message);
 
+/* A source module supplied by an embedder. All pointers remain caller-owned.
+ * name is the exact require() key; filename is used in diagnostics. */
+typedef struct {
+    const char *name;
+    const char *filename;
+    const char *source;
+} LuacModuleSource;
+
+/* Compile a closed, explicit project into C. Unlike luac_compile_c(), this
+ * never searches the filesystem for modules: every supplied module becomes a
+ * native package.preload entry, including modules loaded by dynamic require.
+ * main_source and module source strings must be NUL-terminated. Returns NULL
+ * on invalid input or compile failure; release both results with luac_free(). */
+LUAC_API char *luac_compile_bundle_c(const char *main_source, const char *main_filename,
+                                     const LuacModuleSource *modules, size_t module_count,
+                                     char **error_message);
+
 /* Returns 1 for valid syntax, 0 for invalid input. */
 LUAC_API int luac_check(const char *source, const char *filename,
                         char **error_message);

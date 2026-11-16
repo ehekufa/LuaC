@@ -409,8 +409,13 @@ jobs:
           tail -20 android-build.log
       - name: Compile native project for Android emulator
         run: |
-          make -j2 luac
+          make -j2 luac libraries
           mkdir -p tests/.tmp android/app/build/outputs/apk/aot
+          cc -std=c99 -Isrc tests/bundle_codegen.c build/libluac.a -o tests/.tmp/bundle-codegen -ldl
+          tests/.tmp/bundle-codegen tests/.tmp/bundle-android.c
+          "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang" \
+            -std=gnu99 -O1 -DLUAC_STANDALONE tests/.tmp/bundle-android.c \
+            -o android/app/build/outputs/apk/aot/bundle-project -lm -ldl
           ./luac --emit-c examples/compiled_project/main.lua -o tests/.tmp/generated.c
           "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang" \
             -std=gnu99 -O1 -Itests/.tmp -Isrc examples/compiled_project/host.c \
@@ -428,6 +433,7 @@ jobs:
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             android/app/build/outputs/apk/aot/compiled-project
+            android/app/build/outputs/apk/aot/bundle-project
           retention-days: 2
           if-no-files-found: error
 

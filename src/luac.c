@@ -902,11 +902,50 @@ static void cg_c_literal_content(Str *out, const char *text) {
     }
 }
 
-static char *generate_c(Parser*p,Stmt*program,const char*source){
+static char *generate_c_bundle(Parser *p, Stmt *program, const char *source,
+                               const LuacModuleSource *inputs, size_t input_count,
+                               int explicit_bundle, char **error_message) {
     Cg cg;Cf root;Expr mainexpr;char*entry;Str out;ModuleBuild modules;int i;
     memset(&cg,0,sizeof(cg));cg.parser=p;sb_init(&cg.functions);memset(&modules,0,sizeof(modules));modules.cg=&cg;modules.root_file=source;
-    discover_module_requires(&modules,program,source);
-    for(i=0;i<modules.count&&!cg.failed;++i)generate_disk_module(&cg,&modules.items[i]);
+    if (explicit_bundle) {
+        size_t n;
+        for (n = 0; n < input_count; ++n) {
+            DiskModule *module;
+            if (modules.count == modules.capacity) {
+                modules.capacity = modules.capacity ? modules.capacity * 2 : 8;
+                modules.items = xrealloc(modules.items, sizeof(*modules.items) * (size_t)modules.capacity);
+            }
+            module = &modules.items[modules.count++];
+            memset(module, 0, sizeof(*module));
+            module->name = xstrdup(inputs[n].name);
+            module->path = xstrdup(inputs[n].filename ? inputs[n].filename : inputs[n].name);
+            module->source = xstrdup(inputs[n].source);
+            module->id = modules.count;
+            module->parser.source = module->source;
+            module->parser.filename = module->path;
+            module->parser.length = strlen(module->source);
+            module->parser.line = module->parser.column = 1;
+            next_token(&module->parser);
+            module->program = parse_block(&module->parser);
+            if (module->parser.token.kind != T_EOF) parse_error(&module->parser, "unexpected token in module");
+            verify_program(&module->parser, module->program);
+            if (module->parser.failed) {
+                if (error_message) *error_message = xstrdup(module->parser.error);
+                cg.failed = 1;
+                break;
+            }
+        }
+    } else discover_module_requires(&modules,program,source);
+    for(i=0;i<modules.count&&!cg.failed;++i) {
+        generate_disk_module(&cg,&modules.items[i]);
+        if (cg.failed && error_message && !*error_message && modules.items[i].parser.failed)
+            *error_message = xstrdup(modules.items[i].parser.error);
+    }
+    if (cg.failed) {
+        sb_free(&cg.functions);
+        dispose_disk_modules(&modules);
+        return NULL;
+    }
     cg.parser=p;
     memset(&root,0,sizeof(root));root.cg=&cg;sb_init(&root.decl);sb_init(&root.body);sb_init(&root.cleanup);memset(&mainexpr,0,sizeof(mainexpr));mainexpr.kind=E_FUNCTION;mainexpr.body=program;mainexpr.line=1;
     /* Root has no parent and acts as the main native function. */
@@ -914,12 +953,17 @@ static char *generate_c(Parser*p,Stmt*program,const char*source){
     sb_add(&out,runtime_header_path());
     sb_add(&out,"\"\n\n#ifndef LC_RELEASE\n#define LC_RELEASE(ctx, v) do { lc_release((ctx), (v)); (v) = lc_nil(); } while (0)\n#endif\n\n");sb_add(&out,cg.functions.data?cg.functions.data:"");sb_add(&out,"static LcValue lc_user_main(LcContext *ctx, LcFunction *self, int argc, LcValue *argv) {\n");sb_add(&out,f->decl.data?f->decl.data:"");sb_add(&out,"    LcValue lc_return_value = {0};\n    (void)self; (void)argc; (void)argv;\n");sb_add(&out,f->body.data?f->body.data:"");sb_add(&out,"lc_done:\n");sb_add(&out,f->cleanup.data?f->cleanup.data:"");sb_add(&out,"    return lc_return_value;\n}\n\n");
     sb_add(&out,"int lc_program_main(LcContext *ctx) {\n    LcValue r;\n");
-    for(i=0;i<modules.count;++i){int j;sb_printf(&out,"    lc_preload_native(ctx, \"");
-        for(j=0;modules.items[i].name[j];++j){char c=modules.items[i].name[j];if(c=='\\'||c=='\"')sb_printf(&out,"\\%c",c);else sb_n(&out,&c,1);}sb_printf(&out,"\", lc_disk_module_%d);\n",modules.items[i].id);}
+    for(i=0;i<modules.count;++i){sb_add(&out,"    lc_preload_native(ctx, \"");
+        cg_c_literal_content(&out, modules.items[i].name);
+        sb_printf(&out,"\", lc_disk_module_%d);\n",modules.items[i].id);}
     sb_add(&out,"    r = lc_user_main(ctx, NULL, 0, NULL);\n    lc_release(ctx, r);\n    return lc_report_error(ctx);\n}\n\n#if defined(_WIN32)\n__declspec(dllexport)\n#else\n__attribute__((visibility(\"default\")))\n#endif\nint lc_jit_main(void) {\n    LcContext *ctx = lc_context_new(\"");cg_c_literal_content(&out,source);sb_add(&out,"\");\n    int status;\n    if (!ctx) return 1;\n    status = lc_program_main(ctx);\n    lc_context_destroy(ctx);\n    return status;\n}\n\n#ifdef LUAC_STANDALONE\nint main(void) { return lc_jit_main(); }\n#endif\n");}
     entry=out.data;cf_dispose(&root);sb_free(&cg.functions);dispose_disk_modules(&modules);(void)entry;
     if(cg.failed){sb_free(&out);return NULL;}
     return out.data;
+}
+
+static char *generate_c(Parser *p, Stmt *program, const char *source) {
+    return generate_c_bundle(p, program, source, NULL, 0, 0, NULL);
 }
 
 /* ----------------------------- Public C API ----------------------------- */
@@ -956,6 +1000,42 @@ LUAC_API char *luac_compile_c(const char *source, const char *filename, char **e
     result = generate_c(&p, program, p.filename);
     if (!result && error_message) *error_message = xstrdup("code generation failed");
     token_clear(&p.token); free_stmt(program);
+    return result;
+}
+
+LUAC_API char *luac_compile_bundle_c(const char *main_source, const char *main_filename,
+                                     const LuacModuleSource *modules, size_t module_count,
+                                     char **error_message) {
+    Parser parser;
+    Stmt *program;
+    char *result;
+    size_t i, j;
+    if (error_message) *error_message = NULL;
+    if (!main_source || (module_count && !modules) || module_count > 4096) {
+        if (error_message) *error_message = xstrdup("invalid project bundle");
+        return NULL;
+    }
+    for (i = 0; i < module_count; ++i) {
+        if (!modules[i].name || !*modules[i].name || !modules[i].source) {
+            if (error_message) *error_message = xstrdup("module name and source are required");
+            return NULL;
+        }
+        for (j = 0; j < i; ++j) if (!strcmp(modules[i].name, modules[j].name)) {
+            if (error_message) {
+                Str message; sb_init(&message); sb_printf(&message, "duplicate module: %s", modules[i].name);
+                *error_message = message.data;
+            }
+            return NULL;
+        }
+    }
+    api_parse(&parser, main_source, main_filename, &program);
+    if (parser.failed) {
+        if (error_message) *error_message = xstrdup(parser.error);
+        token_clear(&parser.token); free_stmt(program); return NULL;
+    }
+    result = generate_c_bundle(&parser, program, parser.filename, modules, module_count, 1, error_message);
+    if (!result && error_message && !*error_message) *error_message = xstrdup("code generation failed");
+    token_clear(&parser.token); free_stmt(program);
     return result;
 }
 

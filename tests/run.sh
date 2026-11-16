@@ -100,6 +100,14 @@ cmp tests/.tmp/audio-expected.out tests/.tmp/audio-aot.out
 make libraries >/dev/null
 cc -std=c99 -Isrc tests/api_test.c build/libluac.a -o tests/.tmp/api-test
 tests/.tmp/api-test
+
+# Explicit in-memory bundles compile dynamic require targets to native code too.
+cc -std=c99 -Isrc tests/bundle_codegen.c build/libluac.a -o tests/.tmp/bundle-codegen ${DL_LIBS:-}
+tests/.tmp/bundle-codegen tests/.tmp/bundle.c
+cc -std=gnu99 -O1 -DLUAC_STANDALONE tests/.tmp/bundle.c -o tests/.tmp/bundle -lm ${DL_LIBS:-}
+(cd / && "$OLDPWD/tests/.tmp/bundle") > tests/.tmp/bundle.out
+printf '%s\n' 'Compiled bundle: OK' > tests/.tmp/bundle-expected.out
+cmp tests/.tmp/bundle-expected.out tests/.tmp/bundle.out
 ./build/ui-test
 ./build/engine-test
 
