@@ -571,7 +571,8 @@ jobs:
         run: |
           mkdir -p release-ready
           cp "$SIGNED_APK" release-ready/LuaC-Studio-release.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose release-ready/LuaC-Studio-release.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --min-sdk-version 26 release-ready/LuaC-Studio-release.apk
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging release-ready/LuaC-Studio-release.apk
           sha256sum release-ready/LuaC-Studio-release.apk | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload signed release APK
         if: steps.signing_config.outputs.enabled == 'true'
@@ -610,6 +611,9 @@ jobs:
         with:
           name: LuaC-Studio-Android-Release-APK
           path: android/app/build/outputs/apk/release-published
+      - name: Inspect signed release APK and native ABIs
+        if: ${{ needs.android-release.result == 'success' && needs.android-release.outputs.signed == 'true' }}
+        run: python3 android/tests/check_release_apk.py android/app/build/outputs/apk/release-published/LuaC-Studio-release.apk
       - name: Ensure Android build tools
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
