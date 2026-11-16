@@ -126,7 +126,7 @@ public class DeviceBlocksTest {
             }
             send(instrumentation, down, android.view.MotionEvent.ACTION_UP, positions[1][0], positions[1][1]);
             instrumentation.waitForIdleSync();
-            assertEquals("trace=" + editorView[0].dragTrace + " positions=" + java.util.Arrays.deepToString(positions),
+            assertEquals("positions=" + java.util.Arrays.deepToString(positions),
                 "B", document.blocks.getJSONObject(0).getString("text"));
             assertEquals("A", document.blocks.getJSONObject(1).getString("text"));
             assertTrue(document.dirty);

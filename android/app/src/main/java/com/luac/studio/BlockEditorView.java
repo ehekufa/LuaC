@@ -26,7 +26,6 @@ final class BlockEditorView extends ScrollView {
     private final boolean ru;
     private final LinearLayout content;
     private final int pad;
-    final StringBuilder dragTrace = new StringBuilder();
     private static final String[] TYPES = {"print", "printvar", "set", "textvar", "change", "multiply", "divide", "repeat", "if", "ifelse", "scene", "object", "position", "move", "size", "velocity"};
     private static final String[] OPS = {"==", "~=", "<", ">", "<=", ">="};
 
@@ -75,16 +74,8 @@ final class BlockEditorView extends ScrollView {
             cardParams.setMargins(0, pad / 2, 0, pad / 2); parent.addView(card, cardParams);
             TextView title = text(summary(block)); title.setTypeface(null, Typeface.BOLD);
             title.setContentDescription(tr("Hold and drag: ", "Зажмите и перетащите: ") + summary(block));
-            title.setOnTouchListener((v, event) -> {
-                if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) dragTrace.append("down ");
-                return false;
-            });
-            title.setOnLongClickListener(v -> {
-                boolean started = v.startDragAndDrop(ClipData.newPlainText("block", ""),
-                    new View.DragShadowBuilder(v), new DraggedBlock(list, index), 0);
-                dragTrace.append("long:").append(started).append(' ');
-                return started;
-            });
+            title.setOnLongClickListener(v -> v.startDragAndDrop(ClipData.newPlainText("block", ""),
+                new View.DragShadowBuilder(v), new DraggedBlock(list, index), 0));
             card.addView(title);
             LinearLayout actions = new LinearLayout(getContext()); actions.setOrientation(LinearLayout.HORIZONTAL);
             addAction(actions, tr("Edit", "Изменить"), () -> edit(block, false, list));
@@ -126,11 +117,10 @@ final class BlockEditorView extends ScrollView {
             if (!(event.getLocalState() instanceof DraggedBlock)) return false;
             switch (event.getAction()) {
                 case DragEvent.ACTION_DRAG_STARTED: return true;
-                case DragEvent.ACTION_DRAG_ENTERED: dragTrace.append("enter:").append(depth).append(':').append(slot).append(' '); view.setBackgroundColor(0xff427c75); return true;
+                case DragEvent.ACTION_DRAG_ENTERED: view.setBackgroundColor(0xff427c75); return true;
                 case DragEvent.ACTION_DRAG_EXITED:
                 case DragEvent.ACTION_DRAG_ENDED: view.setBackgroundColor(Color.TRANSPARENT); return true;
                 case DragEvent.ACTION_DROP:
-                    dragTrace.append("drop:").append(depth).append(':').append(slot).append(' ');
                     DraggedBlock dragged = (DraggedBlock) event.getLocalState();
                     try {
                         if (BlockMoves.move(dragged.source, dragged.index, list, slot, depth)) changed();
