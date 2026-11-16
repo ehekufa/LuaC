@@ -129,6 +129,7 @@ public class DeviceBlocksTest {
     }
     private static void send(android.app.Instrumentation instrumentation, long down, int action, float x, float y) {
         android.view.MotionEvent event = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action, x, y, 0);
-        try { instrumentation.sendPointerSync(event); } finally { event.recycle(); }
+        try { assertTrue(instrumentation.getUiAutomation().injectInputEvent(event, true)); }
+        finally { event.recycle(); }
     }
 }
