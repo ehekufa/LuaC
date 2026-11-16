@@ -93,6 +93,20 @@ final class ProjectStore {
         return project;
     }
 
+    File createSceneProject(String requested) throws IOException {
+        String name = safeName(requested, "Project");
+        File staging = Files.createTempDirectory(root.getParentFile().toPath(), ".luac-scene-").toFile();
+        try {
+            SceneProject.create(this, staging);
+            File destination = unique(root, name);
+            Files.move(staging.toPath(), destination.toPath());
+            return destination;
+        } catch (IOException | RuntimeException error) {
+            try { delete(staging); } catch (IOException cleanup) { error.addSuppressed(cleanup); }
+            throw error;
+        }
+    }
+
     private String luaString(String value) { return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"; }
 
     private void copyLogo(File destination) throws IOException {

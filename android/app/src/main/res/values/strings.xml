@@ -28,4 +28,6 @@
     <string name="run_project">Run project</string>
     <string name="more_options">More options</string>
     <string name="editor_ready">Ready. RUN executes main.lua and all its require() modules.</string>
+    <string name="scene_add_actor">Add actor</string>
+    <string name="scene_files">Project files</string>
 </resources>

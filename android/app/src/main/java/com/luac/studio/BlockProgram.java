@@ -133,7 +133,7 @@ final class BlockProgram {
         if (!number.matches("-?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?")) return false;
         try { return Double.isFinite(Double.parseDouble(number)); } catch (NumberFormatException e) { return false; }
     }
-    private static String quote(String value) {
+    static String quote(String value) {
         StringBuilder result = new StringBuilder("\"");
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);

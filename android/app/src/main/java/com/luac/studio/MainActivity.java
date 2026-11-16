@@ -71,6 +71,8 @@ public final class MainActivity extends AppCompatActivity {
     private File project, directory, editorFile, imageFile, importDirectory, exportProject, apkProject;
     private EditText editor;
     private BlockProgram blockProgram;
+    private String scenePage, sceneEditorReturn;
+    private boolean sceneFilesReturn;
     private TextView output;
     private RuntimeView runtimeView;
     private PaintView paintView;
@@ -173,6 +175,7 @@ public final class MainActivity extends AppCompatActivity {
         showingSamples = false;
         paintView = null;
         project = directory = editorFile = imageFile = null;
+        scenePage = sceneEditorReturn = null; sceneFilesReturn = false;
         MaterialToolbar bar = toolbar(R.layout.screen_projects);
         String version = "native unavailable";
         if (nativeAvailable) try { version = nativeVersion(); } catch (Throwable ignored) { }
@@ -335,15 +338,110 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void newProjectDialog() {
-        nameDialog(tr("New project", "Новый проект"), "", "Project name", tr("Create", "Создать"), name -> {
-            try { showProject(store.createProject(name)); }
-            catch (Exception error) { toast(error); }
-        });
+        String[] types = {tr("Lua project", "Проект Lua"), tr("Scene project", "Проект со сценой")};
+        new MaterialAlertDialogBuilder(this).setTitle(tr("Project type", "Тип проекта"))
+            .setItems(types, (dialog, which) -> nameDialog(tr("New project", "Новый проект"), "",
+                tr("Project name", "Название проекта"), tr("Create", "Создать"), name -> {
+                    try { showProject(which == 0 ? store.createProject(name) : store.createSceneProject(name)); }
+                    catch (Exception error) { toast(error); }
+                })).setNegativeButton(tr("Cancel", "Отмена"), null).show();
     }
 
-    private void showProject(File selected) { project = selected; showDirectory(selected); }
+    private void showProject(File selected) {
+        project = selected;
+        if (SceneProject.isScene(selected)) showScene(); else showDirectory(selected);
+    }
+
+    private MaterialButton sceneButton(String text, Runnable action) {
+        MaterialButton button = new MaterialButton(this);
+        button.setText(text); button.setAllCaps(false); button.setTextColor(Color.WHITE);
+        button.setOnClickListener(v -> action.run());
+        return button;
+    }
+
+    private void showScene() {
+        stopRuntime(); paintView = null; editorFile = imageFile = null;
+        directory = project; scenePage = "scene"; sceneEditorReturn = null; sceneFilesReturn = false;
+        final SceneProject scene;
+        try { scene = SceneProject.open(store, project); }
+        catch (Exception error) { toast(error); showDirectory(project); return; }
+        MaterialToolbar bar = toolbar(R.layout.screen_scene);
+        bar.setTitle(project.getName()); bar.setSubtitle(tr("Scene", "Сцена"));
+        back(bar, this::showProjects);
+        bar.inflateMenu(R.menu.menu_scene);
+        bar.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == R.id.action_run) startProject(project);
+            else if (item.getItemId() == R.id.action_scene_files) { sceneFilesReturn = true; showDirectory(project); }
+            else if (item.getItemId() == R.id.action_export_project) exportProject(project);
+            else if (item.getItemId() == R.id.action_build_apk) chooseApkDestination(project);
+            return true;
+        });
+        LinearLayout content = findViewById(R.id.scene_content);
+        content.addView(sceneButton(tr("Background", "Фон"), () -> showSceneObject("background")));
+        TextView heading = new TextView(this); heading.setTextColor(Color.WHITE); heading.setTextSize(18);
+        heading.setText(tr("Actors", "Актёры")); content.addView(heading);
+        org.json.JSONArray actors = scene.actors();
+        for (int i = 0; i < actors.length(); i++) {
+            org.json.JSONObject actor = actors.optJSONObject(i);
+            String id = actor.optString("id"), name = actor.optString("name");
+            content.addView(sceneButton(name, () -> showSceneObject(id)));
+        }
+        findViewById(R.id.scene_add).setOnClickListener(v ->
+            nameDialog(tr("New empty actor", "Новый пустой актёр"), "", tr("Actor name", "Имя актёра"), tr("Create", "Создать"), name -> {
+                try { scene.addActor(name); showScene(); } catch (Exception error) { toast(error); }
+            }));
+    }
+
+    private void showSceneObject(String id) {
+        final SceneProject scene;
+        final String name, look;
+        try {
+            scene = SceneProject.open(store, project);
+            name = id.equals("background") ? tr("Background", "Фон") : scene.actor(id).getString("name");
+            look = id.equals("background") ? scene.background() : scene.actor(id).getString("look");
+        } catch (Exception error) { toast(error); showScene(); return; }
+        stopRuntime(); editorFile = imageFile = null; directory = project;
+        scenePage = "object"; sceneEditorReturn = null;
+        MaterialToolbar bar = toolbar(R.layout.screen_scene);
+        bar.setTitle(name); bar.setSubtitle(tr("Object", "Объект")); back(bar, this::showScene);
+        findViewById(R.id.scene_add).setVisibility(View.GONE);
+        LinearLayout content = findViewById(R.id.scene_content);
+        TextView hint = new TextView(this); hint.setTextColor(Color.WHITE);
+        hint.setText(id.equals("background")
+            ? tr("The background script runs once when the scene starts.", "Скрипт фона выполняется один раз при запуске сцены.")
+            : tr("Scripts run once when the scene starts. Use sprite for this actor.",
+                "Скрипты выполняются один раз при запуске сцены. Для этого актёра используйте sprite."));
+        content.addView(hint);
+        content.addView(sceneButton(tr("Scripts", "Скрипты"), () -> {
+            try { sceneEditorReturn = id; showEditor(scene.script(id)); }
+            catch (Exception error) { sceneEditorReturn = null; toast(error); }
+        }));
+        TextView current = new TextView(this); current.setTextColor(Color.WHITE);
+        current.setText(tr("Look: ", "Образ: ") + (look.isEmpty() ? tr("none", "нет") : look)); content.addView(current);
+        content.addView(sceneButton(tr("Choose look from assets", "Выбрать образ из assets"), () -> chooseSceneLook(scene, id)));
+    }
+
+    private void chooseSceneLook(SceneProject scene, String id) {
+        File assets = new File(project, "assets");
+        java.util.ArrayList<String> paths = new java.util.ArrayList<>();
+        for (File file : store.children(assets)) {
+            String name = file.getName().toLowerCase(Locale.ROOT);
+            if (file.isFile() && (name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg")))
+                paths.add("assets/" + file.getName());
+        }
+        String[] choices = new String[paths.size() + 1];
+        choices[0] = tr("No image", "Без изображения");
+        for (int i = 0; i < paths.size(); i++) choices[i + 1] = paths.get(i);
+        new MaterialAlertDialogBuilder(this).setTitle(tr("Choose look (import or draw images in Project files)",
+            "Выберите образ (импорт или рисунок — в файлах проекта)"))
+            .setItems(choices, (dialog, index) -> {
+                try { scene.setLook(id, index == 0 ? "" : paths.get(index - 1)); showSceneObject(id); }
+                catch (Exception error) { toast(error); }
+            }).setNegativeButton(tr("Cancel", "Отмена"), null).show();
+    }
 
     private void showDirectory(File selected) {
+        scenePage = sceneEditorReturn = null;
         stopRuntime();
         paintView = null;
         directory = selected;
@@ -467,8 +565,12 @@ public final class MainActivity extends AppCompatActivity {
         MaterialToolbar bar = toolbar(R.layout.screen_editor);
         bar.setTitle(file.getName());
         bar.setSubtitle(relative(file));
-        back(bar, () -> { if (saveEditor()) showDirectory(directory); });
+        back(bar, this::leaveEditor);
         bar.inflateMenu(R.menu.menu_editor);
+        if (sceneEditorReturn != null) {
+            bar.getMenu().findItem(R.id.action_rename).setVisible(false);
+            bar.getMenu().findItem(R.id.action_delete).setVisible(false);
+        }
         bar.setOnMenuItemClickListener(item -> {
             if (item.getItemId() == R.id.action_rename) renameEditorFile();
             else if (item.getItemId() == R.id.action_check) { if (saveEditor()) output.setText(compilerCall(editor.getText().toString(), false)); }
@@ -480,7 +582,7 @@ public final class MainActivity extends AppCompatActivity {
         try {
             String source = store.read(file);
             editor.setText(source);
-            if (StudioTheme.blocks(this) && file.getName().toLowerCase(Locale.ROOT).endsWith(".lua")) {
+            if ((sceneEditorReturn != null || StudioTheme.blocks(this)) && file.getName().toLowerCase(Locale.ROOT).endsWith(".lua")) {
                 blockProgram = BlockProgram.open(source);
                 editor.setVisibility(View.GONE);
                 FrameLayout host = findViewById(R.id.editor_host);
@@ -493,6 +595,13 @@ public final class MainActivity extends AppCompatActivity {
         MaterialButton run = findViewById(R.id.run);
         run.setOnClickListener(v -> { if (saveEditor()) startProject(project); });
         output = findViewById(R.id.output);
+    }
+
+    private void leaveEditor() {
+        if (!saveEditor()) return;
+        String id = sceneEditorReturn;
+        sceneEditorReturn = null;
+        if (id != null) showSceneObject(id); else showDirectory(directory);
     }
 
     private void renameEditorFile() {
@@ -784,10 +893,13 @@ public final class MainActivity extends AppCompatActivity {
         if (showingSamples) { showProjects(); return; }
         if (paintView != null) { leavePaint(); return; }
         if (running || runtimeView != null) { showProject(project); return; }
-        if (editorFile != null) { if (saveEditor()) showDirectory(directory); return; }
+        if (editorFile != null) { leaveEditor(); return; }
         if (imageFile != null) { showDirectory(imageFile.getParentFile()); return; }
         if (project != null) {
-            if (directory != null && !directory.equals(project)) showDirectory(directory.getParentFile());
+            if ("object".equals(scenePage)) showScene();
+            else if ("scene".equals(scenePage)) showProjects();
+            else if (directory != null && !directory.equals(project)) showDirectory(directory.getParentFile());
+            else if (sceneFilesReturn) showScene();
             else showProjects();
             return;
         }
