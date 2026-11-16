@@ -431,7 +431,7 @@ jobs:
           mkdir -p build/portable-gcc/lib
           cp -r /ucrt64/lib/gcc build/portable-gcc/lib/
           find build/portable-gcc/lib/gcc -type f \( -name 'cc1plus.exe' -o -name 'lto1.exe' -o -name 'libstdc++*' -o -name 'libgfortran*' -o -name 'libgomp*' \) -delete
-          for pattern in '*.o' libmingw*.a libmoldname*.a libmsvcrt*.a libucrt*.a libpthread*.a libwinpthread*.a libkernel32*.a libuser32*.a libadvapi32*.a libshell32*.a libole32*.a liboleaut32*.a libuuid*.a libws2_32*.a libcrypt32*.a libbcrypt*.a libgdi32*.a libwinmm*.a libavrt*.a libiphlpapi*.a libntdll*.a libsecur32*.a libmbed*.a; do
+          for pattern in '*.o' libgcc*.a libmingw*.a libmoldname*.a libmsvcrt*.a libucrt*.a libpthread*.a libwinpthread*.a libkernel32*.a libuser32*.a libadvapi32*.a libshell32*.a libole32*.a liboleaut32*.a libuuid*.a libws2_32*.a libcrypt32*.a libbcrypt*.a libgdi32*.a libwinmm*.a libavrt*.a libiphlpapi*.a libntdll*.a libsecur32*.a libmbed*.a; do
             for file in /ucrt64/lib/$pattern; do [ ! -f "$file" ] || cp "$file" build/portable-gcc/lib/; done
           done
           if [ -d /ucrt64/libexec ]; then cp -r /ucrt64/libexec build/portable-gcc/; fi
@@ -480,13 +480,20 @@ jobs:
           Copy-Item -Path (Join-Path $cli[0].DirectoryName '*') -Destination dist/java-image/LuaC-Studio -Recurse -Force
           Copy-Item -Path build/portable-gcc -Destination dist/java-image/LuaC-Studio/gcc -Recurse -Force
           Copy-Item -Path desktop/third_party -Destination dist/java-image/LuaC-Studio/licenses/java -Recurse -Force
+          Compress-Archive -Path dist/java-image/LuaC-Studio -DestinationPath dist/LuaC-Studio-Java-GCC-windows-x86_64.zip -CompressionLevel Optimal
+          Remove-Item dist/java-image/LuaC-Studio/gcc -Recurse -Force
           Compress-Archive -Path dist/java-image/LuaC-Studio -DestinationPath dist/LuaC-Studio-Java-windows-x86_64.zip -CompressionLevel Optimal
-          $size = (Get-Item dist/LuaC-Studio-Java-windows-x86_64.zip).Length
-          Write-Output ("::notice::Java Studio ZIP size: {0:N1} MiB" -f ($size / 1MB))
-          if ($size -ge 90MB) { throw "Java Studio archive is too large: $size bytes" }
-      - name: Test extracted app without installed Java or GCC
+          foreach ($archive in @('dist/LuaC-Studio-Java-windows-x86_64.zip', 'dist/LuaC-Studio-Java-GCC-windows-x86_64.zip')) {
+            $size = (Get-Item $archive).Length
+            Write-Output ("::notice::Java Studio ZIP {0}: {1:N1} MiB" -f $archive, ($size / 1MB))
+            if ($size -ge 90MB) { throw "Java Studio archive is too large: $size bytes" }
+          }
+      - name: Test lightweight extracted app without installed Java or compiler
         shell: pwsh
-        run: ./desktop/tests/windows_package.ps1
+        run: ./desktop/tests/windows_package.ps1 -Package 'dist/LuaC-Studio-Java-windows-x86_64.zip'
+      - name: Test GCC extracted app without installed Java or compiler
+        shell: pwsh
+        run: ./desktop/tests/windows_package.ps1 -Package 'dist/LuaC-Studio-Java-GCC-windows-x86_64.zip' -ExpectGcc
       - name: Inspect Studio preview
         shell: pwsh
         run: |
@@ -515,6 +522,11 @@ jobs:
         with:
           name: LuaC-Studio-windows-x86_64
           path: dist/LuaC-Studio-Java-windows-x86_64.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v6
+        with:
+          name: LuaC-Studio-GCC-windows-x86_64
+          path: dist/LuaC-Studio-Java-GCC-windows-x86_64.zip
           if-no-files-found: error
 
   android:

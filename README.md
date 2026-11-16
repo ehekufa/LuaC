@@ -158,15 +158,16 @@ Workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) запус
 | `LuaC-windows-x86_64` | `luac.exe`, статическая и динамическая библиотеки, headers |
 | `LuaC-linux-x86_64` | CLI, `libluac.a`, `libluac.so`, headers |
 | `LuaC-macos-arm64` | CLI, `libluac.a`, `libluac.dylib`, headers |
-| `LuaC-Studio-windows-x86_64` | Java Studio для Windows: launcher `.exe`, Java runtime, LuaC, GCC и TinyCC в комплекте |
+| `LuaC-Studio-windows-x86_64` | лёгкая Java Studio для Windows: Java runtime, LuaC и TinyCC в комплекте |
+| `LuaC-Studio-GCC-windows-x86_64` | Java Studio для Windows с GCC и TinyCC в комплекте |
 | `LuaC-Studio-Vulkan-windows-x86_64` | прежний Vulkan GUI, shaders и необходимые DLL |
 | `LuaC-Studio-linux-x86_64` | Vulkan GUI, CLI, shaders |
 | `LuaC-Studio-Android-Debug-APK` | устанавливаемый debug APK с проектами, многофайловым runtime, assets и game viewport |
 | `LuaC-Studio-Android-Release-APK` | release APK с вашей подписью, если настроены секреты |
 
-Windows Java Studio нужно распаковать целиком и запустить `LuaC-Studio.exe`; отдельная установка Java, GCC или MSYS2 не требуется. В комплект включены Java runtime и переносимый GCC; TinyCC также доступен как запасной компилятор. Размер архива зависит от комплектных headers и библиотек GCC. Проекты хранятся в `%APPDATA%/LuaC/projects`. Java-версия поддерживает проекты, файлы, папки, импорт файлов, совместимые с Android архивы `.luac`, пакеты-примеры, Paint, просмотр PNG/JPEG, текстовый редактор, проверку, запуск, остановку и настройки. Блочный редактор, редактор сцен, Android Canvas/LÖVE и сборка Android APK пока не перенесены; примеры Canvas можно импортировать, но их графический runtime на ПК не реализован. Предыдущий Vulkan-интерфейс остаётся отдельным артефактом; его `luac-gui.exe`, DLL и папка `build` должны находиться вместе.
+Windows Java Studio нужно распаковать целиком и запустить `LuaC-Studio.exe`; отдельная установка Java, GCC или MSYS2 не требуется. Лёгкий архив содержит Java runtime и компактный TinyCC, но не GCC. Отдельный более крупный архив GCC содержит оба компилятора и по умолчанию использует GCC. TinyCC поддерживает обычную компиляцию проектов LuaC, но не все расширения GCC. Проекты хранятся в `%APPDATA%/LuaC/projects`. Java-версия поддерживает проекты, файлы, папки, импорт файлов, совместимые с Android архивы `.luac`, пакеты-примеры, Paint, просмотр PNG/JPEG, текстовый редактор, проверку, запуск, остановку и настройки. Блочный редактор, редактор сцен, Android Canvas/LÖVE и сборка Android APK пока не перенесены; примеры Canvas можно импортировать, но их графический runtime на ПК не реализован. Предыдущий Vulkan-интерфейс остаётся отдельным артефактом; его `luac-gui.exe`, DLL и папка `build` должны находиться вместе.
 
-Для JIT/AOT в Java Studio на Windows используется комплектный GCC, без отдельной установки. Для других сборок desktop может потребоваться системный C-компилятор (`cc`, GCC или Clang). В APK синтаксическая проверка и генерация C выполняются внутри нативной библиотеки. **RUN** использует встроенный AST runtime поверх тех же native libraries, поэтому проекты запускаются на телефоне без host C toolchain.
+Для JIT/AOT в Java Studio на Windows используется комплектный TinyCC (или GCC в отдельном GCC-архиве), без отдельной установки. Для других сборок desktop может потребоваться системный C-компилятор (`cc`, GCC или Clang). В APK синтаксическая проверка и генерация C выполняются внутри нативной библиотеки. **RUN** использует встроенный AST runtime поверх тех же native libraries, поэтому проекты запускаются на телефоне без host C toolchain.
 
 ## LuaC Studio — Vulkan GUI
 

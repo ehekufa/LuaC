@@ -78,8 +78,10 @@ public final class DesktopTest {
             Compiler compiler = new Compiler(home);
             String nativeOutput = run(compiler, project, "--jit", Paths.get("main.lua"), false);
             check(nativeOutput.contains("Hello from LuaC!"), "native output missing");
-            if (System.getenv("LUAC_TRACE") != null && Files.exists(home.resolve("gcc/bin/gcc.exe")))
-                check(nativeOutput.contains("gcc.exe"), "bundled GCC was not used: " + nativeOutput);
+            if (System.getenv("LUAC_TRACE") != null && System.getProperty("os.name").toLowerCase().contains("win")) {
+                String expected = Files.exists(home.resolve("gcc/bin/gcc.exe")) ? "gcc.exe" : "tcc.exe";
+                check(nativeOutput.contains(expected), "bundled compiler was not used: " + nativeOutput);
+            }
             run(compiler, project, "--check", project.resolve("main.lua"), false);
             store.save(project.resolve("main.lua"), "print('BEGIN')\nwhile true do end\n");
             run(compiler, project, "--jit", Paths.get("main.lua"), true);

@@ -1,3 +1,4 @@
+param([string]$Package = 'dist/LuaC-Studio-Java-windows-x86_64.zip', [switch]$ExpectGcc)
 $ErrorActionPreference = 'Stop'
 trap {
     $message = ($_ | Out-String).Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' ')
@@ -6,11 +7,13 @@ trap {
 }
 $work = Join-Path $env:RUNNER_TEMP 'LuaC Java Studio package test'
 if (Test-Path $work) { Remove-Item -Force -Recurse $work }
-Expand-Archive -LiteralPath 'dist/LuaC-Studio-Java-windows-x86_64.zip' -DestinationPath $work
+Expand-Archive -LiteralPath $Package -DestinationPath $work
 $appDir = Join-Path $work 'LuaC-Studio'
-foreach ($name in @('LuaC-Studio.exe', 'app/LuaC-Studio.jar', 'runtime/bin/java.exe', 'luac.exe', 'tcc/tcc.exe', 'gcc/bin/gcc.exe', 'runtime.h')) {
+foreach ($name in @('LuaC-Studio.exe', 'app/LuaC-Studio.jar', 'runtime/bin/java.exe', 'luac.exe', 'tcc/tcc.exe', 'runtime.h')) {
     if (!(Test-Path (Join-Path $appDir $name))) { throw "Missing package file: $name" }
 }
+if ($ExpectGcc -and !(Test-Path (Join-Path $appDir 'gcc/bin/gcc.exe'))) { throw 'Missing packaged GCC' }
+if (!$ExpectGcc -and (Test-Path (Join-Path $appDir 'gcc/bin/gcc.exe'))) { throw 'Light package unexpectedly contains GCC' }
 # No system Java, MSYS2 or GCC can be found in this PATH.
 $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
 $env:JAVA_HOME = ''
@@ -26,16 +29,19 @@ $exitCode = $LASTEXITCODE
 $results | ForEach-Object { Write-Output "$_" }
 if ($exitCode -ne 0) { throw "Packaged GUI/native compiler test failed: $($results -join ' ')" }
 # AOT exercises the standalone linker path (different startup objects from JIT).
-$env:CPATH = Join-Path $appDir 'gcc/include'
-$env:LIBRARY_PATH = Join-Path $appDir 'gcc/lib'
-$env:PATH = "$(Join-Path $appDir 'gcc/bin');$appDir;$env:SystemRoot\System32;$env:SystemRoot"
+$compiler = if ($ExpectGcc) { Join-Path $appDir 'gcc/bin/gcc.exe' } else { Join-Path $appDir 'tcc/tcc.exe' }
+if ($ExpectGcc) {
+    $env:CPATH = Join-Path $appDir 'gcc/include'
+    $env:LIBRARY_PATH = Join-Path $appDir 'gcc/lib'
+}
+$env:PATH = "$(Split-Path $compiler);$appDir;$env:SystemRoot\System32;$env:SystemRoot"
 $src = Join-Path $work 'standalone.lua'
 $exe = Join-Path $work 'standalone.exe'
 Set-Content -LiteralPath $src -Value "print('PORTABLE GCC AOT OK')" -Encoding utf8
-$aot = & (Join-Path $appDir 'luac.exe') --cc (Join-Path $appDir 'gcc/bin/gcc.exe') --aot $src -o $exe 2>&1
-if ($LASTEXITCODE -ne 0) { throw "Portable GCC AOT failed: $($aot -join ' ')" }
+$aot = & (Join-Path $appDir 'luac.exe') --cc $compiler --aot $src -o $exe 2>&1
+if ($LASTEXITCODE -ne 0) { throw "Bundled compiler AOT failed: $($aot -join ' ')" }
 $aotResult = & $exe 2>&1
-if ($LASTEXITCODE -ne 0 -or ($aotResult -join ' ') -notmatch 'PORTABLE GCC AOT OK') { throw "Portable GCC executable failed: $($aotResult -join ' ')" }
+if ($LASTEXITCODE -ne 0 -or ($aotResult -join ' ') -notmatch 'PORTABLE GCC AOT OK') { throw "Bundled compiler executable failed: $($aotResult -join ' ')" }
 # Restore the clean PATH before starting the launcher.
 $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
 # Also test the actual double-clickable launcher, independently of system Java.
@@ -52,5 +58,5 @@ try {
     }
     $resolved = (Get-Content $marker -Raw).Trim()
     if ($resolved -ne $appDir) { throw "Launcher chose wrong application directory: $resolved (expected $appDir)" }
-    Write-Output 'Extracted Java launcher window and bundled GCC: OK'
+    Write-Output 'Extracted Java launcher window and bundled compiler: OK'
 } finally { if (!$proc.HasExited) { $proc.Kill(); $proc.WaitForExit() } }
