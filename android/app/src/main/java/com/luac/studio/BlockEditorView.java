@@ -75,6 +75,10 @@ final class BlockEditorView extends ScrollView {
             cardParams.setMargins(0, pad / 2, 0, pad / 2); parent.addView(card, cardParams);
             TextView title = text(summary(block)); title.setTypeface(null, Typeface.BOLD);
             title.setContentDescription(tr("Hold and drag: ", "Зажмите и перетащите: ") + summary(block));
+            title.setOnTouchListener((v, event) -> {
+                if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) dragTrace.append("down ");
+                return false;
+            });
             title.setOnLongClickListener(v -> {
                 boolean started = v.startDragAndDrop(ClipData.newPlainText("block", ""),
                     new View.DragShadowBuilder(v), new DraggedBlock(list, index), 0);

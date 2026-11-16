@@ -111,6 +111,7 @@ public class DeviceBlocksTest {
             });
             InstrumentationRegistry.getInstrumentation().waitForIdleSync();
             assertNotNull(positions[0]); assertNotNull(positions[1]);
+            onView(withContentDescription("Hold and drag: Print: A")).check(matches(isDisplayed()));
             long down = android.os.SystemClock.uptimeMillis();
             android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
             send(instrumentation, down, android.view.MotionEvent.ACTION_DOWN, positions[0][0], positions[0][1]);
